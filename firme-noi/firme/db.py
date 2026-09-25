@@ -224,6 +224,13 @@ class Database:
     def iter_needing_bilant(self, limit: Optional[int] = None) -> Iterator[Company]:
         yield from self._iter("bilant_verificat = 0", "data_colectare", limit)
 
+    def cui_range(self, sursa: str) -> tuple[Optional[int], Optional[int]]:
+        """CUI minim și maxim al firmelor venite dintr-o sursă (sau None)."""
+        row = self.conn.execute(
+            "SELECT MIN(cui), MAX(cui) FROM companies WHERE sursa = ?", (sursa,)
+        ).fetchone()
+        return row[0], row[1]
+
     def iter_all(self) -> Iterator[Company]:
         yield from self._iter("1=1", "data_colectare", None)
 

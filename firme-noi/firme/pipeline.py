@@ -43,6 +43,12 @@ class Pipeline:
                 f"Sursă necunoscută: {source_name}. Disponibile: {list(REGISTRY)}"
             )
         started = now_iso()
+        if source_name == "anaf_scan":
+            # Continuăm de unde am rămas: în sus de la cel mai mare CUI știut,
+            # în jos de la cel mai mic (dacă nu s-a ajuns încă la începutul anului).
+            known_min, known_max = self.db.cui_range("anaf_scan")
+            options.setdefault("known_min", known_min)
+            options.setdefault("known_max", known_max)
         source = source_cls(self.config, self._session(min_interval=0.0), **options)
 
         noi = vazute = 0

@@ -19,8 +19,7 @@ from typing import Iterator, Optional
 
 from . import caen as caen_ref
 from .models import Company
-from .sources.onrc_opendata import parse_date
-from .util import clean_phone, is_suspect_phone
+from .util import clean_phone, is_suspect_phone, parse_date
 
 log = logging.getLogger("firme")
 

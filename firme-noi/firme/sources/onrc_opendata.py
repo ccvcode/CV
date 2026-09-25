@@ -25,6 +25,7 @@ import zipfile
 from typing import Iterable, Iterator, Optional
 
 from ..models import Company
+from ..util import parse_date
 from .base import Source
 
 log = logging.getLogger("firme")
@@ -81,20 +82,6 @@ def map_column(header: str) -> Optional[str]:
         return "cui"
     if h.startswith("DENUMIRE") and "STRADA" not in h:
         return "denumire"
-    return None
-
-
-def parse_date(value: Optional[str]) -> Optional[str]:
-    """Normalizează o dată ONRC la YYYY-MM-DD (acceptă și DD.MM.YYYY)."""
-    if not value:
-        return None
-    v = value.strip()
-    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", v)
-    if m:
-        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
-    m = re.match(r"^(\d{1,2})[./](\d{1,2})[./](\d{4})", v)
-    if m:
-        return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
     return None
 
 

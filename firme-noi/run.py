@@ -117,6 +117,8 @@ def source_options(args) -> dict:
         opts["dupa"] = dupa
     if args.cui_min:
         opts["cui_min"] = args.cui_min
+    if getattr(args, "seed", None):
+        opts["seed"] = args.seed
     return opts
 
 
@@ -163,8 +165,8 @@ def cmd_probe(args, cfg, db):
         print(f"ONRC: {title}\n  URL: {url}")
         print(f"  coloane: {', '.join(src.read_header(url))}")
     except Exception as exc:  # noqa: BLE001
-        print(f"  EROARE ONRC: {exc}")
-        ok = False
+        # Nu e blocant: lista de firme se poate lua și prin sursa anaf_scan.
+        print(f"  AVERTISMENT ONRC (indisponibil, se poate folosi --source anaf_scan): {exc}")
 
     if not ok:
         sys.exit(1)
@@ -305,10 +307,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
 
     def add_source_args(sp):
-        sp.add_argument("--source", default="onrc", choices=["onrc", "monitorul_oficial"])
+        sp.add_argument("--source", default="onrc",
+                        choices=["onrc", "anaf_scan", "monitorul_oficial"],
+                        help="onrc = lista oficială data.gov.ro; anaf_scan = parcurgere CUI prin ANAF")
         sp.add_argument("--an", type=int, help="doar firmele înmatriculate din acest an (ex. 2026)")
         sp.add_argument("--dupa", help="doar firmele înmatriculate după data YYYY-MM-DD")
-        sp.add_argument("--cui-min", type=int, help="filtru de rezervă: CUI minim")
+        sp.add_argument("--cui-min", type=int, help="filtru de rezervă (onrc): CUI minim")
+        sp.add_argument("--seed", type=int, help="anaf_scan: CUI recent de la care pornește scanarea")
 
     sp = sub.add_parser("collect", help="colectează firme noi dintr-o sursă")
     add_source_args(sp)

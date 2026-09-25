@@ -24,6 +24,20 @@ def today_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+def parse_date(value) -> Optional[str]:
+    """Normalizează o dată la YYYY-MM-DD (acceptă și DD.MM.YYYY / DD/MM/YYYY)."""
+    if not value:
+        return None
+    v = str(value).strip()
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", v)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    m = re.match(r"^(\d{1,2})[./](\d{1,2})[./](\d{4})", v)
+    if m:
+        return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+    return None
+
+
 def chunked(items: Iterable[T], size: int) -> Iterator[list[T]]:
     """Împarte un iterabil în blocuri de dimensiune `size`."""
     batch: list[T] = []

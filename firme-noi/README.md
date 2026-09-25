@@ -148,6 +148,18 @@ nu creează duplicate și ANAF e interogat doar pentru firmele noi.
 Firmele înmatriculate după data ultimului set ONRC publicat apar abia la
 următoarea actualizare ONRC.
 
+**Sursa `anaf_scan` (implicită pe GitHub).** `data.gov.ro` nu răspunde
+serverelor din afara României, deci pe GitHub lista se ia direct de la ANAF:
+CUI-urile se alocă în ordine (număr de bază + cifră de control), iar sistemul
+interoghează ANAF în loturi de 100 de CUI-uri consecutive — în sus până la cele
+mai noi, în jos până la firmele înregistrate înainte de `--dupa`. Fiecare firmă
+găsită vine direct cu datele ANAF (inclusiv telefonul), iar datele sunt la zi,
+nu cu întârzierea lunară a ONRC. Rulările următoare scanează doar CUI-urile noi.
+
+```bash
+python run.py collect --source anaf_scan --an 2026
+```
+
 ---
 
 ## Ce conține baza de date

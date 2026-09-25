@@ -21,6 +21,10 @@ on:
         description: "Limită firme la ANAF (gol = toate; ex. 300 pentru un test rapid)"
         required: false
         default: ""
+      sursa:
+        description: "Sursa listei: anaf_scan (merge de pe GitHub) sau onrc (data.gov.ro, doar din România)"
+        required: false
+        default: "anaf_scan"
   schedule:
     - cron: "23 4 * * *"   # zilnic, ~07:23 ora României
   push:
@@ -65,6 +69,9 @@ jobs:
           DUPA="${{ inputs.dupa }}"
           [ -z "$DUPA" ] && DUPA="$(date -u +%Y)-01-01"
           echo "DUPA=$DUPA" >> "$GITHUB_ENV"
+          SURSA="${{ inputs.sursa }}"
+          [ -z "$SURSA" ] && SURSA="anaf_scan"
+          echo "SURSA=$SURSA" >> "$GITHUB_ENV"
           echo "LIMIT=${{ inputs.limit }}" >> "$GITHUB_ENV"
           echo "AN=${DUPA:0:4}" >> "$GITHUB_ENV"
 
@@ -78,8 +85,8 @@ jobs:
       - name: Verificare acces ANAF + ONRC
         run: python run.py probe
 
-      - name: Colectare firme noi (ONRC)
-        run: python run.py collect --source onrc --dupa "$DUPA"
+      - name: Colectare firme noi
+        run: python run.py collect --source "$SURSA" --dupa "$DUPA"
 
       - name: Îmbogățire ANAF (telefon, adresă, CAEN, TVA)
         run: |

@@ -301,5 +301,68 @@ class TestOnrcParsing(unittest.TestCase):
             list(self._source(dupa="2026-01-01").parse_lines(sample))
 
 
+class TestAnafScan(unittest.TestCase):
+    def test_control_digit_matches_real_cuis(self):
+        from firme.sources.anaf_scan import cui_from_base, is_valid_cui
+        for cui in (55626258, 55626215, 55625503, 55622590, 55625490):
+            self.assertEqual(cui_from_base(cui // 10), cui)
+            self.assertTrue(is_valid_cui(cui))
+        self.assertFalse(is_valid_cui(55626259))
+
+    def _fake_client(self, max_base=1250, first_2026=1100, fail_once=()):
+        from firme.sources.anaf_scan import cui_from_base
+        state = {"failed": set()}
+
+        class Fake:
+            def lookup_batches(self_, cuis):
+                cuis = list(cuis)
+                key = cuis[0]
+                if key in fail_once and key not in state["failed"]:
+                    state["failed"].add(key)
+                    yield cuis, {}, set(), False
+                    return
+                found = {}
+                for cui in cuis:
+                    base = cui // 10
+                    if 1000 <= base <= max_base:
+                        date = "2026-03-01" if base >= first_2026 else "2025-06-01"
+                        found[cui] = Company(cui=cui, denumire=f"F{base} SRL", data_inregistrare=date,
+                                             telefon="0721234567" if base % 2 else None,
+                                             anaf_verificat=True)
+                yield cuis, found, set(), True
+        return Fake(), cui_from_base
+
+    def _source(self, client, **opts):
+        from firme.config import Config
+        from firme.sources.anaf_scan import AnafScanSource, cui_from_base
+        cfg = Config()
+        cfg.anaf_batch_size = 10
+        return AnafScanSource(cfg, None, client=client, seed=cui_from_base(1200),
+                              dupa="2026-01-01", stop_after=2, retry_waits=(0,), **opts)
+
+    def test_scan_finds_exactly_the_period(self):
+        client, _ = self._fake_client()
+        src = self._source(client)
+        bases = sorted(c.cui // 10 for c in src.collect())
+        self.assertEqual(bases, list(range(1100, 1251)))   # tot 2026, nimic din 2025
+        self.assertTrue(all(c for c in bases))
+        self.assertEqual(src.missed, [])
+
+    def test_failed_batch_is_retried(self):
+        from firme.sources.anaf_scan import cui_from_base
+        client, _ = self._fake_client(fail_once=(cui_from_base(1201),))
+        src = self._source(client)
+        bases = {c.cui // 10 for c in src.collect()}
+        self.assertIn(1201, bases)
+        self.assertEqual(src.missed, [])
+
+    def test_incremental_run_only_scans_new(self):
+        from firme.sources.anaf_scan import cui_from_base
+        client, _ = self._fake_client(max_base=1260)
+        src = self._source(client, known_min=cui_from_base(1100), known_max=cui_from_base(1250))
+        bases = sorted(c.cui // 10 for c in src.collect())
+        self.assertEqual(bases, list(range(1251, 1261)))   # doar firmele apărute între timp
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

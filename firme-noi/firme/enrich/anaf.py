@@ -25,7 +25,7 @@ from .. import caen as caen_ref
 from ..config import Config
 from ..models import Company
 from ..util import (
-    ThrottledSession, chunked, clean_phone, is_suspect_phone, today_str,
+    ThrottledSession, chunked, clean_phone, is_suspect_phone, parse_date, today_str,
 )
 
 log = logging.getLogger("firme")
@@ -133,7 +133,8 @@ class AnafClient:
             caen_sectiune=caen_info["caen_sectiune"],
             caen_sectiune_nume=caen_info["caen_sectiune_nume"],
             stare_inregistrare=general.get("stare_inregistrare") or None,
-            data_inregistrare=general.get("data_inregistrare") or None,
+            data_inregistrare=(parse_date(general.get("data_inregistrare"))
+                               or general.get("data_inregistrare") or None),
             act=general.get("act") or None,
             inactiv=bool(inactiv.get("statusInactivi")) if "statusInactivi" in inactiv else None,
             data_inactivare=inactiv.get("dataInactivare") or None,
