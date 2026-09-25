@@ -24,7 +24,9 @@ from typing import Iterable, Optional
 from .. import caen as caen_ref
 from ..config import Config
 from ..models import Company
-from ..util import ThrottledSession, chunked, normalize_phone, today_str
+from ..util import (
+    ThrottledSession, chunked, clean_phone, is_suspect_phone, today_str,
+)
 
 log = logging.getLogger("firme")
 
@@ -38,32 +40,52 @@ class AnafClient:
     def endpoint(self) -> str:
         return f"{self.config.anaf_base_url}/PlatitorTvaRest/{self.config.anaf_version}/tva"
 
+    def query_raw(self, cuis: Iterable[int]) -> dict:
+        """O singură cerere ANAF; întoarce corpul JSON brut."""
+        payload = [{"cui": int(cui), "data": today_str()} for cui in cuis]
+        resp = self.session.post(
+            self.endpoint, json=payload, headers={"Content-Type": "application/json"},
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        if "found" not in body and "notFound" not in body:
+            raise RuntimeError(f"Răspuns ANAF neașteptat: {str(body)[:200]}")
+        return body
+
+    def lookup_batches(self, cuis: Iterable[int]):
+        """Pentru fiecare lot (max. 100 CUI) produce (lot, găsite, negăsite, ok).
+
+        ok=False înseamnă că cererea a eșuat: firmele din lot NU trebuie marcate
+        ca verificate, ca să fie reîncercate la rularea următoare.
+        """
+        for batch in chunked(list(cuis), self.config.anaf_batch_size):
+            try:
+                body = self.query_raw(batch)
+            except Exception as exc:  # noqa: BLE001 - continuăm cu lotul următor
+                log.error("Cerere ANAF eșuată pentru %d CUI-uri: %s", len(batch), exc)
+                yield batch, {}, set(), False
+                continue
+
+            found: dict[int, Company] = {}
+            for entry in body.get("found") or []:
+                company = self._parse_entry(entry)
+                if company is not None:
+                    found[company.cui] = company
+
+            not_found: set[int] = set()
+            for item in body.get("notFound") or []:
+                value = item.get("cui") if isinstance(item, dict) else item
+                try:
+                    not_found.add(int(value))
+                except (TypeError, ValueError):
+                    pass
+            yield batch, found, not_found, True
+
     def lookup(self, cuis: Iterable[int]) -> dict[int, Company]:
         """Interoghează ANAF pentru CUI-urile date și întoarce {cui: Company}."""
         results: dict[int, Company] = {}
-        data = today_str()
-        for batch in chunked(list(cuis), self.config.anaf_batch_size):
-            payload = [{"cui": int(cui), "data": data} for cui in batch]
-            try:
-                resp = self.session.post(
-                    self.endpoint,
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
-                )
-                resp.raise_for_status()
-                body = resp.json()
-            except Exception as exc:  # noqa: BLE001 - vrem să continuăm cu următorul batch
-                log.error("Cerere ANAF eșuată pentru %d CUI-uri: %s", len(batch), exc)
-                continue
-
-            for entry in body.get("found", []):
-                company = self._parse_entry(entry)
-                if company is not None:
-                    results[company.cui] = company
-
-            not_found = body.get("notFound", [])
-            if not_found:
-                log.info("ANAF: %d CUI-uri negăsite în acest batch.", len(not_found))
+        for _, found, _, _ in self.lookup_batches(cuis):
+            results.update(found)
         return results
 
     # ------------------------------------------------------------------ #
@@ -89,7 +111,7 @@ class AnafClient:
         adresa = general.get("adresa") or _compose_address(sediu, "s")
         adresa_fiscala = _compose_address(fiscal, "d")
 
-        telefon = normalize_phone(general.get("telefon"))
+        telefon = clean_phone(general.get("telefon"))
 
         # Perioada TVA (dacă există, luăm ultima).
         tva_inceput = tva_sfarsit = None
@@ -135,7 +157,8 @@ class AnafClient:
             adresa_fiscala=adresa_fiscala,
             telefon=telefon,
             telefon_sursa="anaf" if telefon else None,
-            fax=general.get("fax") or None,
+            telefon_suspect=is_suspect_phone(telefon) if telefon else None,
+            fax=clean_phone(general.get("fax")),
             anaf_verificat=True,
         )
 

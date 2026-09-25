@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Optional
 
 from .config import Config
@@ -10,7 +11,7 @@ from .db import Database
 from .enrich import AnafClient, BilantClient, build_phone_finders
 from .models import Company
 from .sources import REGISTRY
-from .util import ThrottledSession, now_iso
+from .util import ThrottledSession, is_suspect_phone, now_iso
 
 log = logging.getLogger("firme")
 
@@ -31,32 +32,36 @@ class Pipeline:
     # 1. COLECTARE                                                        #
     # ------------------------------------------------------------------ #
 
-    def collect(self, source_name: str) -> int:
-        """Colectează dintr-o sursă și salvează firmele NOI. Întoarce nr. noi."""
+    def collect(self, source_name: str, **options) -> int:
+        """Colectează dintr-o sursă și salvează firmele NOI. Întoarce nr. noi.
+
+        `options` merg la sursă (ex. dupa="2026-01-01", cui_min=..., judet=...).
+        """
         source_cls = REGISTRY.get(source_name)
         if source_cls is None:
             raise ValueError(
                 f"Sursă necunoscută: {source_name}. Disponibile: {list(REGISTRY)}"
             )
         started = now_iso()
-        session = self._session(min_interval=0.0)
-        source = source_cls(self.config, session)
+        source = source_cls(self.config, self._session(min_interval=0.0), **options)
 
-        noi = 0
-        vazute = 0
+        noi = vazute = 0
+        buf: list[Company] = []
         for company in source.collect():
             vazute += 1
-            if self.db.insert_new(company):
-                noi += 1
-            if vazute % 5000 == 0:
-                log.info("Procesate %d firme din sursă (%d noi)...", vazute, noi)
+            buf.append(company)
+            if len(buf) >= 5000:
+                noi += self.db.insert_many(buf)
+                buf = []
+                log.info("Citite %d firme din sursă (%d noi)...", vazute, noi)
+        noi += self.db.insert_many(buf)
 
         self.db.log_run(
             etapa="collect", sursa=source_name, inceput=started,
             firme_noi=noi, firme_procesate=vazute,
-            detalii=f"{vazute} firme văzute în sursă",
+            detalii=f"{vazute} firme în sursă (filtre: {options or 'niciunul'})",
         )
-        log.info("Colectare terminată: %d firme noi din %d văzute.", noi, vazute)
+        log.info("Colectare terminată: %d firme noi din %d găsite în sursă.", noi, vazute)
         return noi
 
     # ------------------------------------------------------------------ #
@@ -64,49 +69,77 @@ class Pipeline:
     # ------------------------------------------------------------------ #
 
     def enrich_anaf(self, limit: Optional[int] = None) -> int:
-        """Completează firmele neverificate cu date oficiale de la ANAF."""
-        started = now_iso()
-        session = self._session(min_interval=self.config.anaf_min_interval)
-        client = AnafClient(self.config, session)
+        """Completează firmele neverificate cu date oficiale de la ANAF.
 
-        pending = list(self.db.iter_needing_anaf(limit=limit))
-        if not pending:
+        Salvează după fiecare lot de 100: dacă rularea se întrerupe, progresul
+        rămâne. Loturile eșuate nu se marchează, deci se reîncearcă data viitoare.
+        """
+        started = now_iso()
+        client = AnafClient(self.config, self._session(min_interval=self.config.anaf_min_interval))
+
+        cuis = [c.cui for c in self.db.iter_needing_anaf(limit=limit)]
+        if not cuis:
             log.info("Nu există firme de verificat la ANAF.")
             return 0
 
-        cuis = [c.cui for c in pending]
-        log.info("Interoghez ANAF pentru %d firme...", len(cuis))
-        results = client.lookup(cuis)
+        total = len(cuis)
+        est_min = total / max(self.config.anaf_batch_size, 1) * self.config.anaf_min_interval / 60
+        log.info("Interoghez ANAF pentru %d firme (~%.0f minute)...", total, est_min)
 
-        procesate = 0
-        for cui in cuis:
-            found = results.get(cui)
-            if found is not None:
-                self.db.update(found)
+        gasite = negasite = esuate = cu_tel = procesate = 0
+        loturi = 0
+        t0 = time.monotonic()
+        for batch, found, _not_found, ok in client.lookup_batches(cuis):
+            loturi += 1
+            procesate += len(batch)
+            if not ok:
+                esuate += len(batch)
             else:
-                # Marcăm ca verificat ca să nu reinterogăm la infinit.
-                self.db.update(Company(cui=cui, anaf_verificat=True))
-            procesate += 1
+                for cui in batch:
+                    company = found.get(cui)
+                    if company is not None:
+                        self.db.update(company, commit=False)
+                        gasite += 1
+                        cu_tel += 1 if company.telefon else 0
+                    else:
+                        # ANAF a răspuns, dar nu cunoaște CUI-ul: nu mai reîncercăm.
+                        self.db.update(Company(cui=cui, anaf_verificat=True), commit=False)
+                        negasite += 1
+                self.db.commit()
+            if loturi % 25 == 0 or procesate == total:
+                elapsed = time.monotonic() - t0
+                eta = elapsed / procesate * (total - procesate) / 60 if procesate else 0
+                log.info(
+                    "ANAF %d/%d | găsite %d | cu telefon %d | negăsite %d | eșuate %d | ETA %.0f min",
+                    procesate, total, gasite, cu_tel, negasite, esuate, eta,
+                )
 
         self.db.log_run(
-            etapa="enrich", sursa="anaf", inceput=started,
-            firme_procesate=procesate,
-            detalii=f"{len(results)} găsite din {len(cuis)} interogate",
+            etapa="enrich", sursa="anaf", inceput=started, firme_procesate=procesate,
+            detalii=(f"{gasite} găsite, {cu_tel} cu telefon, {negasite} negăsite, "
+                     f"{esuate} eșuate (se reîncearcă)"),
         )
-        log.info("Îmbogățire ANAF: %d găsite din %d.", len(results), len(cuis))
-        return len(results)
+        log.info("Îmbogățire ANAF: %d găsite din %d, dintre care %d cu telefon.",
+                 gasite, total, cu_tel)
+        return gasite
 
     # ------------------------------------------------------------------ #
     # 3. GĂSIRE TELEFOANE                                                 #
     # ------------------------------------------------------------------ #
 
     def find_phones(self, limit: Optional[int] = None) -> int:
-        """Încearcă să găsească telefoane pentru firmele fără număr."""
+        """Caută telefoane din surse suplimentare (Google, web) pentru firmele
+        pe care ANAF le-a verificat, dar fără telefon declarat.
+
+        Telefonul ANAF se completează deja la `enrich`; aici rulează doar
+        providerii externi. Fără ei nu marcăm nimic, ca o configurare ulterioară
+        (ex. cheie Google) să poată reîncerca aceleași firme.
+        """
         started = now_iso()
         session = self._session(min_interval=1.0)
-        finders = build_phone_finders(self.config, session)
+        finders = [f for f in build_phone_finders(self.config, session) if f.name != "anaf"]
         if not finders:
-            log.warning("Niciun provider de telefon configurat (PHONE_PROVIDERS).")
+            log.info("Niciun provider extern de telefon configurat (PHONE_PROVIDERS=google,web).")
             return 0
 
         pending = list(self.db.iter_needing_phone(limit=limit))
@@ -126,6 +159,7 @@ class Pipeline:
                     break
             company.telefon = phone
             company.telefon_sursa = source
+            company.telefon_suspect = is_suspect_phone(phone) if phone else None
             company.telefon_cautat = True
             self.db.update(company)
             if phone:
@@ -176,8 +210,8 @@ class Pipeline:
     # Flux complet                                                        #
     # ------------------------------------------------------------------ #
 
-    def run_all(self, source_name: str, limit: Optional[int] = None) -> dict[str, int]:
-        noi = self.collect(source_name)
+    def run_all(self, source_name: str, limit: Optional[int] = None, **options) -> dict[str, int]:
+        noi = self.collect(source_name, **options)
         gasite_anaf = self.enrich_anaf(limit=limit)
         telefoane = self.find_phones(limit=limit)
-        return {"firme_noi": noi, "verificate_anaf": gasite_anaf, "telefoane": telefoane}
+        return {"firme_noi": noi, "gasite_anaf": gasite_anaf, "telefoane_extra": telefoane}

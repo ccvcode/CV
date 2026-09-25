@@ -12,11 +12,13 @@ if [[ -d ".venv" ]]; then
   source .venv/bin/activate
 fi
 
-echo "[$(date '+%F %T')] Pornire colectare firme noi"
-python run.py run --source onrc
+AN="$(date '+%Y')"
+echo "[$(date '+%F %T')] Pornire colectare firme noi ($AN)"
+python run.py run --source onrc --an "$AN"
 python run.py stats
 
-# Export zilnic doar cu firmele care au telefon
-STAMP="$(date '+%Y-%m-%d')"
-python run.py export --out "export/firme_${STAMP}.csv" --with-phone
+# Export: toate firmele din an + doar cele cu telefon valid
+python run.py export --format xlsx --dupa "$AN-01-01" --out "export/Firme-noi-$AN.xlsx"
+python run.py export --format xlsx --dupa "$AN-01-01" --with-phone --fara-suspecte \
+  --out "export/Firme-noi-$AN-cu-telefon.xlsx"
 echo "[$(date '+%F %T')] Gata."

@@ -29,8 +29,37 @@ sistem (`PHONE_PROVIDERS=anaf`). Pentru firmele fără telefon în ANAF, se pot
 adăuga surse suplimentare (Google Places, căutare web).
 
 Sistemul **nu inventează niciodată** un număr — dacă nicio sursă nu întoarce
-unul, câmpul rămâne gol. Comanda `verify` reinteroghează ANAF și îți arată
-exact ce se confirmă, ca să poți valida orice listă.
+unul, câmpul rămâne gol. Câmpul ANAF e completat liber de firme, deci:
+dacă are mai multe numere se păstrează primul valid, numerele din străinătate
+(ex. `+373…`) se păstrează, iar cele de formă (ex. `0770000000`) sunt marcate
+în coloana **„Tel. suspect"** (nu se șterg). Comanda `probe` arată dacă ANAF
+răspunde și dacă întoarce câmpul `telefon`, fără să afișeze datele.
+
+---
+
+## Cum obții firmele din 2026 cu telefoane — alege o variantă
+
+Sistemul are nevoie de acces la internet către `data.gov.ro` (lista ONRC) și
+`webservicesp.anaf.ro` (telefon + date ANAF). Prima rulare pe un an întreg
+durează ~30–40 de minute (ANAF acceptă o cerere pe secundă, 100 de firme per
+cerere); rulările următoare interoghează doar firmele nou apărute.
+
+**A. Automat, zilnic, pe GitHub (recomandat)**
+1. Creează un repository **privat** (ex. `firme-noi`) și copiază în el conținutul
+   acestui folder (`firme-noi/` devine rădăcina repository-ului).
+2. În tab-ul **Actions** pornește „Colectare firme noi" (*Run workflow*).
+3. Descarcă Excel-ul din secțiunea **Artifacts** a rulării. De atunci rulează
+   singur în fiecare dimineață. Workflow-ul refuză să ruleze într-un repository
+   public, ca datele de contact să nu devină publice.
+
+**B. Pe calculatorul tău (Windows)** — instalează Python, apoi dublu-click pe
+`scripts\colecteaza.bat`. Excel-urile apar în folderul `export`.
+
+**C. Linux / Mac / server** — `bash scripts/run_daily.sh` (sau programat cu cron,
+vezi `scripts/crontab.example`).
+
+Rezultatul: `Firme-noi-2026.xlsx` (toate firmele) și
+`Firme-noi-2026-cu-telefon.xlsx` (doar cele cu telefon valid).
 
 ---
 
@@ -50,8 +79,11 @@ Necesită Python 3.10+.
 ## Utilizare rapidă
 
 ```bash
-# 1. Colectează firmele noi din ONRC (data.gov.ro)
-python run.py collect --source onrc
+# 0. Verifică accesul la ANAF și ONRC (și dacă ANAF întoarce telefonul)
+python run.py probe
+
+# 1. Colectează firmele înmatriculate în 2026 din ONRC (data.gov.ro)
+python run.py collect --source onrc --an 2026
 
 # 2. Completează cu date oficiale de la ANAF
 python run.py enrich
@@ -102,13 +134,17 @@ telefoane care nu vin din nicio sursă oficială).
 ## Cum sunt detectate „firmele noi"
 
 ONRC nu publică un flux „doar firmele de azi", ci un fișier cu **toate** firmele
-(`OD_FIRME.csv`), actualizat periodic. Sistemul folosește baza de date ca
-memorie: **orice CUI care apare în fișier și nu există încă la noi este o firmă
-nouă**. La prima rulare se creează baza de referință; de la a doua rulare
-încolo obții doar noutățile. Rulările repetate nu creează duplicate.
+(`OD_FIRME.csv`), actualizat periodic (de regulă lunar). Filtrarea se face după
+coloana `DATA_INMATRICULARE`: `--an 2026` păstrează doar firmele înmatriculate
+în 2026. Dacă o versiune a fișierului nu are această coloană, comanda se
+oprește cu un mesaj clar în loc să ia toate cele ~3 milioane de firme; atunci
+folosește `--cui-min` (CUI-urile se alocă crescător).
 
-Pentru confirmarea că o firmă e într-adevăr recentă, folosește
-`data_inregistrare` adusă de ANAF (data reală a înmatriculării).
+În plus, baza de date ține minte CUI-urile deja văzute, deci rulările repetate
+nu creează duplicate și ANAF e interogat doar pentru firmele noi.
+
+Firmele înmatriculate după data ultimului set ONRC publicat apar abia la
+următoarea actualizare ONRC.
 
 ---
 
@@ -145,6 +181,9 @@ Secțiunile CAEN utile: **F** construcții, **G** comerț, **J** IT & comunicaț
 
 ## Automatizare (rulare zilnică)
 
+Pe GitHub: workflow-ul `.github/workflows/colectare.yml` (varianta A de mai sus)
+rulează zilnic și păstrează baza de date între rulări. Pe un server propriu:
+
 ```bash
 chmod +x scripts/run_daily.sh
 crontab -e     # adaugă linia din scripts/crontab.example
@@ -156,7 +195,8 @@ crontab -e     # adaugă linia din scripts/crontab.example
 
 ```
 firme-noi/
-├── run.py                    # CLI (collect/enrich/phones/bilant/run/import/verify/stats/filter/export)
+├── .github/workflows/        # colectare zilnică pe GitHub Actions (doar repo privat)
+├── run.py                    # CLI (probe/collect/enrich/phones/bilant/run/import/verify/stats/filter/export/page)
 ├── firme/
 │   ├── config.py             # configurare din .env
 │   ├── models.py             # modelul Company (schema bogată)
@@ -172,7 +212,7 @@ firme-noi/
 │       ├── anaf.py           #   API oficial ANAF (adresă, CAEN, TVA, stare…)
 │       ├── bilant.py         #   indicatori financiari (cifră afaceri, profit, salariați)
 │       └── phone.py          #   telefoane: anaf / google / web
-├── scripts/                  # rulare zilnică + exemplu cron
+├── scripts/                  # colecteaza.bat (Windows), run_daily.sh, exemplu cron
 └── tests/                    # teste (fără rețea)
 ```
 

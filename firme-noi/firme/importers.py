@@ -19,6 +19,8 @@ from typing import Iterator, Optional
 
 from . import caen as caen_ref
 from .models import Company
+from .sources.onrc_opendata import parse_date
+from .util import clean_phone, is_suspect_phone
 
 log = logging.getLogger("firme")
 
@@ -128,9 +130,15 @@ def iter_companies_from_file(path: Path | str, sursa: str = "import") -> Iterato
         clean = {
             k: (str(v).strip() if isinstance(v, str) else v) for k, v in record.items()
         }
-        telefon = clean.get("telefon")
+        raw_tel = clean.get("telefon")
+        telefon = clean_phone(raw_tel) or (str(raw_tel).strip() if raw_tel else None)
         cod_caen = str(clean.get("cod_caen")).strip() if clean.get("cod_caen") is not None else None
         caen_info = caen_ref.enrich_caen(cod_caen)
+        data_raw = clean.get("data_inregistrare")
+        if hasattr(data_raw, "strftime"):
+            data_inreg = data_raw.strftime("%Y-%m-%d")
+        else:
+            data_inreg = parse_date(str(data_raw)) if data_raw else None
         yield Company(
             cui=cui,
             denumire=clean.get("denumire"),
@@ -142,9 +150,10 @@ def iter_companies_from_file(path: Path | str, sursa: str = "import") -> Iterato
             judet=clean.get("judet"),
             localitate=clean.get("localitate"),
             adresa=clean.get("adresa"),
-            data_inregistrare=str(clean.get("data_inregistrare")) if clean.get("data_inregistrare") else None,
-            telefon=str(telefon).strip() if telefon else None,
+            data_inregistrare=data_inreg,
+            telefon=telefon,
             telefon_sursa="import" if telefon else None,
+            telefon_suspect=is_suspect_phone(telefon) if telefon else None,
             telefon_cautat=bool(telefon),
             email=clean.get("email"),
             website=clean.get("website"),

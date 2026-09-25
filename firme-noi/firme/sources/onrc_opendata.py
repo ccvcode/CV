@@ -1,21 +1,16 @@
 """Sursă: datele deschise ONRC de pe data.gov.ro.
 
-ONRC (Oficiul Național al Registrului Comerțului) publică periodic pe portalul
-de date deschise data.gov.ro un set „Firme înregistrate la Registrul Comerțului
-până la data de ..." care conține fișierul OD_FIRME.csv cu TOATE firmele.
+ONRC publică periodic setul „Firme înregistrate la Registrul Comerțului până
+la data de ..." cu fișierul OD_FIRME.csv (TOATE firmele, separator `^`).
 
-Cum detectăm firmele NOI:
-    Nu există un flux oficial „doar firmele de azi". În schimb, comparăm setul
-    curent cu ce avem deja în baza de date: orice CUI care apare în fișier și nu
-    e încă la noi este o firmă nou apărută. La prima rulare se creează baza de
-    referință; de la a doua rulare încolo obținem doar noutățile.
+Firmele NOI se obțin astfel:
+  - dacă fișierul are coloana DATA_INMATRICULARE: filtrăm direct după dată
+    (ex. `--dupa 2026-01-01` = toate firmele înmatriculate în 2026);
+  - altfel, filtru de rezervă după CUI minim (`--cui-min`), fiindcă CUI-urile
+    se alocă crescător;
+  - în plus, baza de date ignoră CUI-urile deja cunoscute.
 
-    Pentru confirmare, etapa de îmbogățire ANAF aduce `data_inregistrare`
-    (data reală a înmatriculării), pe care o poți folosi ca filtru.
-
-Notă: fișierul este mare (sute de MB). Îl citim în flux (streaming), fără a-l
-încărca tot în memorie. Poți restrânge după județ (ONRC_JUDET) sau limita
-numărul de rânduri citiți (ONRC_MAX_ROWS) în timpul testelor.
+Fișierul are sute de MB; îl citim în flux, fără să-l ținem în memorie.
 """
 
 from __future__ import annotations
@@ -24,7 +19,10 @@ import csv
 import io
 import logging
 import os
-from typing import Iterator, Optional
+import re
+import tempfile
+import zipfile
+from typing import Iterable, Iterator, Optional
 
 from ..models import Company
 from .base import Source
@@ -33,156 +31,259 @@ log = logging.getLogger("firme")
 
 CKAN_SEARCH = "https://data.gov.ro/api/3/action/package_search"
 
-# Cuvinte-cheie pentru maparea flexibilă a coloanelor (fișierul ONRC variază în timp).
-COLUMN_ALIASES = {
-    "cui": ("cui", "cod_fiscal", "codfiscal"),
-    "denumire": ("denumire", "nume", "firma"),
-    "nr_reg_com": ("cod_inmatriculare", "inmatriculare", "nr_reg", "numar_ordine"),
-    "stare_inregistrare": ("stare_firma", "stare", "status"),
-    "judet": ("judet", "cod_judet"),
-    "localitate": ("localitate", "oras", "comuna"),
-    "adresa": ("adresa", "sediu", "strada"),
+# Antetele cunoscute ale fișierului ONRC -> câmpul nostru.
+KNOWN_COLUMNS = {
+    "DENUMIRE": "denumire",
+    "CUI": "cui",
+    "COD_FISCAL": "cui",
+    "COD_INMATRICULARE": "nr_reg_com",
+    "NR_REG_COM": "nr_reg_com",
+    "DATA_INMATRICULARE": "data_inregistrare",
+    "DATA_INREGISTRARE": "data_inregistrare",
+    "EUID": "euid",
+    "FORMA_JURIDICA": "forma_juridica",
+    "ADR_TARA": "tara",
+    "ADR_JUDET": "judet",
+    "JUDET": "judet",
+    "ADR_LOCALITATE": "localitate",
+    "LOCALITATE": "localitate",
+    "ADR_DEN_STRADA": "strada",
+    "ADR_NR_STRADA": "numar",
+    "ADR_COD_POSTAL": "cod_postal",
+    "ADRESA": "adresa",
+    "ADRESA_COMPLETA": "adresa",
+    "ADR_COMPLETA": "adresa",
 }
 
+# Componentele de adresă, în ordinea în care le compunem, cu eticheta lor.
+ADDRESS_PARTS = [
+    ("ADR_DEN_STRADA", ""), ("ADR_NR_STRADA", "nr. "), ("ADR_BLOC", "bl. "),
+    ("ADR_SCARA", "sc. "), ("ADR_ETAJ", "et. "), ("ADR_APARTAMENT", "ap. "),
+    ("ADR_SECTOR", "sector "), ("ADR_COMPLETARE", ""),
+    ("ADR_LOCALITATE", ""), ("ADR_JUDET", "jud. "),
+]
 
-def _match_column(header: str) -> Optional[str]:
-    """Mapează un nume de coloană din CSV la câmpul nostru intern."""
-    key = header.strip().lower().replace(" ", "_").replace("-", "_")
-    for field, aliases in COLUMN_ALIASES.items():
-        if key == field or any(alias in key for alias in aliases):
-            return field
+
+def normalize_header(h: str) -> str:
+    return h.replace("﻿", "").strip().strip('"').upper().replace(" ", "_").replace("-", "_")
+
+
+def map_column(header: str) -> Optional[str]:
+    """Mapează un antet la câmpul intern; întâi exact, apoi aproximativ."""
+    h = normalize_header(header)
+    if h in KNOWN_COLUMNS:
+        return KNOWN_COLUMNS[h]
+    if "DATA" in h and "INMATRICULARE" in h:
+        return "data_inregistrare"
+    if "INMATRICULARE" in h:
+        return "nr_reg_com"
+    if h in ("CIF", "COD_UNIC") or h.endswith("_CUI"):
+        return "cui"
+    if h.startswith("DENUMIRE") and "STRADA" not in h:
+        return "denumire"
     return None
 
 
-class OnrcOpenDataSource(Source):
-    name = "onrc"
-
-    def __init__(self, config, session) -> None:
-        super().__init__(config, session)
-        self.judet_filter = os.environ.get("ONRC_JUDET", "").strip().upper() or None
-        try:
-            self.max_rows = int(os.environ.get("ONRC_MAX_ROWS", "0")) or None
-        except ValueError:
-            self.max_rows = None
-
-    # ------------------------------------------------------------------ #
-
-    def _discover_csv_url(self) -> str:
-        """Găsește pe data.gov.ro cel mai recent OD_FIRME.csv al ONRC."""
-        if self.config.onrc_csv_url:
-            return self.config.onrc_csv_url
-
-        log.info("Caut cel mai recent set de date ONRC pe data.gov.ro...")
-        resp = self.session.get(
-            CKAN_SEARCH,
-            params={
-                "q": "firme registrul comertului",
-                "fq": "organization:onrc",
-                "sort": "metadata_modified desc",
-                "rows": 10,
-            },
-        )
-        resp.raise_for_status()
-        results = resp.json().get("result", {}).get("results", [])
-        for pkg in results:
-            for res in pkg.get("resources", []):
-                url = (res.get("url") or "")
-                fmt = (res.get("format") or "").lower()
-                name = (res.get("name") or "").upper()
-                if ("OD_FIRME" in url.upper() or "OD_FIRME" in name) and (
-                    fmt == "csv" or url.lower().endswith(".csv")
-                ):
-                    log.info("Set de date găsit: %s", pkg.get("title"))
-                    return url
-        raise RuntimeError(
-            "Nu am găsit automat fișierul OD_FIRME.csv pe data.gov.ro. "
-            "Setează manual ONRC_CSV_URL în .env."
-        )
-
-    def _open_stream(self, url: str) -> Iterator[str]:
-        """Deschide CSV-ul în flux și întoarce un iterator de linii text."""
-        resp = self.session.get(url, stream=True)
-        resp.raise_for_status()
-        if not resp.encoding:
-            resp.encoding = "utf-8"
-        yield from resp.iter_lines(decode_unicode=True)
-
-    @staticmethod
-    def _sniff_delimiter(header_line: str) -> str:
-        try:
-            dialect = csv.Sniffer().sniff(header_line, delimiters="^;\t,|")
-            return dialect.delimiter
-        except csv.Error:
-            # ONRC folosește frecvent caret (^) sau punct-și-virgulă (;)
-            for cand in ("^", ";", "\t", "|", ","):
-                if cand in header_line:
-                    return cand
-            return ","
-
-    # ------------------------------------------------------------------ #
-
-    def collect(self) -> Iterator[Company]:
-        url = self._discover_csv_url()
-        log.info("Descarc și parsez %s", url)
-        lines = self._open_stream(url)
-
-        try:
-            header_line = next(lines)
-        except StopIteration:
-            return
-        delimiter = self._sniff_delimiter(header_line)
-        headers = next(csv.reader([header_line], delimiter=delimiter))
-        col_map = {i: _match_column(h) for i, h in enumerate(headers)}
-        if "cui" not in col_map.values():
-            raise RuntimeError(
-                f"Nu am găsit coloana CUI în antet: {headers}. "
-                "Verifică formatul fișierului sau ajustează COLUMN_ALIASES."
-            )
-
-        reader = csv.reader(_line_iter(lines), delimiter=delimiter)
-        count = 0
-        for fields in reader:
-            record: dict[str, str] = {}
-            for i, value in enumerate(fields):
-                field = col_map.get(i)
-                if field:
-                    record[field] = value.strip()
-
-            cui = _parse_cui(record.get("cui"))
-            if cui is None:
-                continue
-            if self.judet_filter and record.get("judet", "").upper() != self.judet_filter:
-                continue
-
-            yield Company(
-                cui=cui,
-                denumire=record.get("denumire") or None,
-                nr_reg_com=record.get("nr_reg_com") or None,
-                judet=record.get("judet") or None,
-                localitate=record.get("localitate") or None,
-                adresa=record.get("adresa") or None,
-                stare_inregistrare=record.get("stare_inregistrare") or None,
-                sursa=self.name,
-            )
-            count += 1
-            if self.max_rows and count >= self.max_rows:
-                log.info("Am atins limita ONRC_MAX_ROWS=%s.", self.max_rows)
-                break
+def parse_date(value: Optional[str]) -> Optional[str]:
+    """Normalizează o dată ONRC la YYYY-MM-DD (acceptă și DD.MM.YYYY)."""
+    if not value:
+        return None
+    v = value.strip()
+    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", v)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    m = re.match(r"^(\d{1,2})[./](\d{1,2})[./](\d{4})", v)
+    if m:
+        return f"{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+    return None
 
 
-def _line_iter(lines: Iterator[str]) -> Iterator[str]:
-    for line in lines:
-        if line:
-            yield line
-
-
-def _parse_cui(raw: Optional[str]) -> Optional[int]:
+def parse_cui(raw: Optional[str]) -> Optional[int]:
     if not raw:
         return None
     digits = "".join(ch for ch in raw if ch.isdigit())
     if not digits:
         return None
+    value = int(digits)
+    return value or None
+
+
+def sniff_delimiter(header_line: str) -> str:
+    for cand in ("^", ";", "\t", "|", ","):
+        if cand in header_line:
+            return cand
+    return ","
+
+
+def _decode(raw: bytes) -> str:
     try:
-        return int(digits)
-    except ValueError:
-        return None
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("cp1250", errors="replace")
+
+
+class OnrcOpenDataSource(Source):
+    name = "onrc"
+
+    def __init__(self, config, session, **options) -> None:
+        super().__init__(config, session, **options)
+        self.dupa = options.get("dupa") or os.environ.get("ONRC_DUPA") or None
+        self.judet_filter = (options.get("judet") or os.environ.get("ONRC_JUDET") or "").upper() or None
+        try:
+            self.cui_min = int(options.get("cui_min") or os.environ.get("ONRC_CUI_MIN") or 0) or None
+        except ValueError:
+            self.cui_min = None
+        try:
+            self.max_rows = int(options.get("max_rows") or os.environ.get("ONRC_MAX_ROWS") or 0) or None
+        except ValueError:
+            self.max_rows = None
+        self.dataset_title: Optional[str] = None
+
+    # ------------------------------------------------------------------ #
+    # Descoperire + descărcare                                             #
+    # ------------------------------------------------------------------ #
+
+    def discover(self) -> tuple[str, str]:
+        """Găsește cel mai recent OD_FIRME pe data.gov.ro. Întoarce (url, titlu)."""
+        if self.config.onrc_csv_url:
+            return self.config.onrc_csv_url, "URL setat manual (ONRC_CSV_URL)"
+        resp = self.session.get(
+            CKAN_SEARCH,
+            params={"fq": "organization:onrc", "sort": "metadata_created desc", "rows": 25},
+        )
+        resp.raise_for_status()
+        for pkg in resp.json().get("result", {}).get("results", []):
+            for res in pkg.get("resources", []):
+                url = res.get("url") or ""
+                label = f"{url} {res.get('name') or ''}".lower()
+                path = url.lower().split("?")[0]
+                if "od_firme" in label and (path.endswith(".csv") or path.endswith(".zip")
+                                            or (res.get("format") or "").lower() == "csv"):
+                    return url, pkg.get("title") or pkg.get("name") or ""
+        raise RuntimeError(
+            "Nu am găsit OD_FIRME pe data.gov.ro. Setează manual ONRC_CSV_URL în .env."
+        )
+
+    def open_lines(self, url: str) -> Iterator[str]:
+        """Liniile fișierului (CSV direct sau CSV din arhivă .zip)."""
+        if url.lower().split("?")[0].endswith(".zip"):
+            tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+            try:
+                resp = self.session.get(url, stream=True)
+                resp.raise_for_status()
+                for chunk in resp.iter_content(1 << 20):
+                    tmp.write(chunk)
+                tmp.close()
+                with zipfile.ZipFile(tmp.name) as zf:
+                    names = zf.namelist()
+                    member = next((n for n in names if "od_firme" in n.lower()), names[0])
+                    with zf.open(member) as fh:
+                        for raw in fh:
+                            yield _decode(raw).rstrip("\r\n")
+            finally:
+                os.unlink(tmp.name)
+            return
+
+        resp = self.session.get(url, stream=True)
+        resp.raise_for_status()
+        try:
+            for raw in resp.iter_lines(chunk_size=1 << 16):
+                yield _decode(raw)
+        finally:
+            resp.close()
+
+    def read_header(self, url: str) -> list[str]:
+        lines = self.open_lines(url)
+        try:
+            for line in lines:
+                if line.strip():
+                    return next(csv.reader([line], delimiter=sniff_delimiter(line)))
+        finally:
+            lines.close()
+        return []
+
+    # ------------------------------------------------------------------ #
+    # Parsare (testabilă fără rețea)                                       #
+    # ------------------------------------------------------------------ #
+
+    def parse_lines(self, lines: Iterable[str]) -> Iterator[Company]:
+        lines = iter(lines)
+        header_line = ""
+        for line in lines:
+            if line.strip():
+                header_line = line
+                break
+        if not header_line:
+            return
+        delimiter = sniff_delimiter(header_line)
+        headers = [normalize_header(h) for h in next(csv.reader([header_line], delimiter=delimiter))]
+        col_map = {i: map_column(h) for i, h in enumerate(headers)}
+        fields = set(col_map.values())
+        log.info("Coloane ONRC: %s", ", ".join(headers))
+        if "cui" not in fields:
+            raise RuntimeError(f"Nu am găsit coloana CUI în antet: {headers}")
+        if self.dupa and "data_inregistrare" not in fields:
+            raise RuntimeError(
+                "Fișierul ONRC nu are coloana DATA_INMATRICULARE, deci nu pot filtra după "
+                "dată. Folosește în schimb --cui-min (CUI-urile se alocă crescător)."
+            )
+        has_address_parts = any(h in headers for h, _ in ADDRESS_PARTS)
+
+        count = 0
+        for values in csv.reader((ln for ln in lines if ln), delimiter=delimiter):
+            record: dict[str, str] = {}
+            raw_by_header: dict[str, str] = {}
+            for i, value in enumerate(values):
+                value = value.strip()
+                if i < len(headers):
+                    raw_by_header[headers[i]] = value
+                field = col_map.get(i)
+                if field and value and field not in record:
+                    record[field] = value
+
+            cui = parse_cui(record.get("cui"))
+            if cui is None:
+                continue
+            if self.cui_min and cui < self.cui_min:
+                continue
+            data_inreg = parse_date(record.get("data_inregistrare"))
+            if self.dupa and (not data_inreg or data_inreg < self.dupa):
+                continue
+            if self.judet_filter and (record.get("judet") or "").upper() != self.judet_filter:
+                continue
+
+            adresa = record.get("adresa")
+            if not adresa and has_address_parts:
+                parts = [
+                    f"{label}{raw_by_header[h]}" for h, label in ADDRESS_PARTS
+                    if raw_by_header.get(h)
+                ]
+                adresa = ", ".join(parts) or None
+
+            yield Company(
+                cui=cui,
+                denumire=record.get("denumire"),
+                nr_reg_com=record.get("nr_reg_com"),
+                euid=record.get("euid"),
+                forma_juridica=record.get("forma_juridica"),
+                data_inregistrare=data_inreg,
+                judet=record.get("judet"),
+                localitate=record.get("localitate"),
+                strada=record.get("strada"),
+                numar=record.get("numar"),
+                cod_postal=record.get("cod_postal"),
+                tara=record.get("tara"),
+                adresa=adresa,
+                sursa=self.name,
+            )
+            count += 1
+            if self.max_rows and count >= self.max_rows:
+                log.info("Am atins limita de %s rânduri.", self.max_rows)
+                break
+
+    def collect(self) -> Iterator[Company]:
+        url, title = self.discover()
+        self.dataset_title = title
+        log.info("Set ONRC: %s", title)
+        log.info("Descarc: %s", url)
+        yield from self.parse_lines(self.open_lines(url))

@@ -1,0 +1,106 @@
+# Colectare automată: firme noi (ONRC) + date ANAF (telefon, adresă, CAEN, TVA).
+#
+# Rulează DOAR într-un repository PRIVAT (rezultatele conțin date de contact).
+# Rezultatul (Excel + CSV) apare ca fișier descărcabil („Artifacts") în pagina
+# rulării din tab-ul Actions. Baza de date se păstrează între rulări, deci
+# rularea zilnică interoghează ANAF doar pentru firmele nou apărute.
+
+name: Colectare firme noi
+
+on:
+  workflow_dispatch:
+    inputs:
+      dupa:
+        description: "Firme înmatriculate după data (YYYY-MM-DD). Gol = 1 ianuarie anul curent."
+        required: false
+        default: ""
+      limit:
+        description: "Limită firme la ANAF (gol = toate; ex. 300 pentru un test rapid)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "23 4 * * *"   # zilnic, ~07:23 ora României
+
+permissions:
+  contents: read
+
+concurrency:
+  group: colectare-firme
+  cancel-in-progress: false
+
+jobs:
+  colectare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Verificare repository privat
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          privat="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .private)"
+          if [ "$privat" != "true" ]; then
+            echo "::error::Repository-ul este public. Rezultatele conțin date de contact; rulează workflow-ul doar într-un repository privat."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Instalare
+        run: pip install -r requirements.txt
+
+      - name: Parametri
+        run: |
+          DUPA="${{ inputs.dupa }}"
+          [ -z "$DUPA" ] && DUPA="$(date -u +%Y)-01-01"
+          echo "DUPA=$DUPA" >> "$GITHUB_ENV"
+          echo "LIMIT=${{ inputs.limit }}" >> "$GITHUB_ENV"
+          echo "AN=${DUPA:0:4}" >> "$GITHUB_ENV"
+
+      - name: Restaurare bază de date
+        uses: actions/cache/restore@v4
+        with:
+          path: data/firme.db
+          key: firme-db-${{ github.run_id }}
+          restore-keys: firme-db-
+
+      - name: Verificare acces ANAF + ONRC
+        run: python run.py probe
+
+      - name: Colectare firme noi (ONRC)
+        run: python run.py collect --source onrc --dupa "$DUPA"
+
+      - name: Îmbogățire ANAF (telefon, adresă, CAEN, TVA)
+        run: |
+          if [ -n "$LIMIT" ]; then python run.py enrich --limit "$LIMIT"; else python run.py enrich; fi
+
+      - name: Salvare bază de date
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/firme.db
+          key: firme-db-${{ github.run_id }}
+
+      - name: Statistici
+        run: python run.py stats
+
+      - name: Export Excel + CSV
+        run: |
+          mkdir -p out
+          python run.py export --format xlsx --dupa "$DUPA" --out "out/Firme-noi-$AN.xlsx"
+          python run.py export --format xlsx --dupa "$DUPA" --with-phone --fara-suspecte \
+            --out "out/Firme-noi-$AN-cu-telefon.xlsx"
+          python run.py export --dupa "$DUPA" --out "out/Firme-noi-$AN.csv"
+
+      - name: Rezultate
+        uses: actions/upload-artifact@v4
+        with:
+          name: firme-noi-${{ env.AN }}
+          path: out/
+          retention-days: 30

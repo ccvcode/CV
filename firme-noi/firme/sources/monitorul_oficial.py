@@ -57,8 +57,8 @@ def _load_pdf_text(pdf_bytes: bytes) -> Optional[str]:
 class MonitorulOficialSource(Source):
     name = "monitorul_oficial"
 
-    def __init__(self, config, session) -> None:
-        super().__init__(config, session)
+    def __init__(self, config, session, **options) -> None:
+        super().__init__(config, session, **options)
         # URL direct către un PDF de Monitorul Oficial (Partea a IV-a).
         self.pdf_url = os.environ.get("MONITOR_PDF_URL", "").strip()
 

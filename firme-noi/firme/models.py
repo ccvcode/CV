@@ -18,6 +18,7 @@ from typing import Any, Optional
 # Câmpuri care sunt booleene opționale (pot fi None = necunoscut).
 OPTIONAL_BOOL_FIELDS = {
     "platitor_tva", "tva_la_incasare", "split_tva", "ro_e_factura", "inactiv",
+    "telefon_suspect",
 }
 # Câmpuri booleene de proces (NULL => False).
 FLAG_FIELDS = {"anaf_verificat", "telefon_cautat", "bilant_verificat"}
@@ -70,6 +71,7 @@ class Company:
     # --- Contact ---
     telefon: Optional[str] = None
     telefon_sursa: Optional[str] = None
+    telefon_suspect: Optional[bool] = None      # ex. 0770000000 — de verificat
     fax: Optional[str] = None
     email: Optional[str] = None
     website: Optional[str] = None

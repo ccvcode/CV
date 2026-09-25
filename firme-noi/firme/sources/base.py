@@ -13,16 +13,17 @@ from ..util import ThrottledSession
 class Source(abc.ABC):
     """O sursă produce un flux de obiecte `Company` (parțial completate).
 
-    Nu îi revine sarcina de a decide ce e „nou" — asta face baza de date, prin
-    verificarea CUI-ului. Sursa doar livrează tot ce găsește.
+    Deduplicarea (ce e „nou") o face baza de date, după CUI. Opțiunile
+    specifice sursei (ex. filtrul de dată) vin prin `options`.
     """
 
     #: numele scurt folosit în CLI și în coloana `sursa`
     name: str = "base"
 
-    def __init__(self, config: Config, session: ThrottledSession) -> None:
+    def __init__(self, config: Config, session: ThrottledSession, **options) -> None:
         self.config = config
         self.session = session
+        self.options = options
 
     @abc.abstractmethod
     def collect(self) -> Iterator[Company]:

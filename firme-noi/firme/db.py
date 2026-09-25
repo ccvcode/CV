@@ -154,14 +154,41 @@ class Database:
         except sqlite3.IntegrityError:
             return False
 
-    def update(self, company: Company) -> None:
-        """Actualizează câmpurile ne-nule (nu suprascrie cu None ce există deja)."""
+    def insert_many(self, companies) -> int:
+        """Inserează în lot; firmele deja existente (după CUI) sunt ignorate.
+        Întoarce numărul de firme noi."""
+        now = now_iso()
+        rows = []
+        for c in companies:
+            c.data_colectare = c.data_colectare or now
+            c.data_actualizare = now
+            row = c.to_row()
+            rows.append(tuple(row[col] for col in COLUMNS))
+        if not rows:
+            return 0
+        before = self.conn.total_changes
+        self.conn.executemany(
+            f"INSERT OR IGNORE INTO companies ({', '.join(COLUMNS)}) "
+            f"VALUES ({', '.join('?' for _ in COLUMNS)})",
+            rows,
+        )
+        self.conn.commit()
+        return self.conn.total_changes - before
+
+    def update(self, company: Company, commit: bool = True) -> None:
+        """Actualizează câmpurile ne-nule (nu suprascrie cu None ce există deja).
+
+        Indicatorii de proces (anaf_verificat, telefon_cautat, bilant_verificat)
+        doar se setează, nu se șterg niciodată printr-un update.
+        """
         company.data_actualizare = now_iso()
         row = company.to_row()
         set_cols, values = [], []
         for col in _UPDATABLE:
             value = row.get(col)
             if value is None:
+                continue
+            if col in FLAG_FIELDS and not value:
                 continue
             set_cols.append(f"{col} = ?")
             values.append(value)
@@ -171,6 +198,10 @@ class Database:
         self.conn.execute(
             f"UPDATE companies SET {', '.join(set_cols)} WHERE cui = ?", values
         )
+        if commit:
+            self.conn.commit()
+
+    def commit(self) -> None:
         self.conn.commit()
 
     # ---------------------------------------------------------------- #
@@ -186,7 +217,8 @@ class Database:
 
     def iter_needing_phone(self, limit: Optional[int] = None) -> Iterator[Company]:
         yield from self._iter(
-            "telefon IS NULL AND telefon_cautat = 0", "data_colectare", limit
+            "telefon IS NULL AND telefon_cautat = 0 AND anaf_verificat = 1",
+            "data_colectare", limit,
         )
 
     def iter_needing_bilant(self, limit: Optional[int] = None) -> Iterator[Company]:
@@ -219,6 +251,8 @@ class Database:
         with_email: Optional[bool] = None,
         platitor_tva: Optional[bool] = None,
         doar_active: bool = False,
+        fara_suspecte: bool = False,
+        doar_verificate: bool = False,
         min_salariati: Optional[int] = None,
         min_cifra_afaceri: Optional[float] = None,
         inregistrata_dupa: Optional[str] = None,
@@ -262,6 +296,10 @@ class Database:
         if doar_active:
             clauses.append("(inactiv IS NULL OR inactiv = 0)")
             clauses.append("(stare_inregistrare IS NULL OR UPPER(stare_inregistrare) NOT LIKE '%RADIAT%')")
+        if fara_suspecte:
+            clauses.append("(telefon_suspect IS NULL OR telefon_suspect = 0)")
+        if doar_verificate:
+            clauses.append("anaf_verificat = 1")
         if min_salariati is not None:
             clauses.append("numar_salariati >= ?")
             params.append(int(min_salariati))
@@ -294,6 +332,7 @@ class Database:
             "total": one("SELECT COUNT(*) FROM companies"),
             "verificate_anaf": one("SELECT COUNT(*) FROM companies WHERE anaf_verificat = 1"),
             "cu_telefon": one("SELECT COUNT(*) FROM companies WHERE telefon IS NOT NULL AND telefon <> ''"),
+            "telefon_suspect": one("SELECT COUNT(*) FROM companies WHERE telefon_suspect = 1"),
             "cu_email": one("SELECT COUNT(*) FROM companies WHERE email IS NOT NULL AND email <> ''"),
             "cu_website": one("SELECT COUNT(*) FROM companies WHERE website IS NOT NULL AND website <> ''"),
             "platitori_tva": one("SELECT COUNT(*) FROM companies WHERE platitor_tva = 1"),

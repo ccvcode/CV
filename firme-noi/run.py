@@ -34,7 +34,7 @@ from firme.webpage import render_artifact, render_standalone
 EXPORT_COLUMNS = [
     "cui", "denumire", "nr_reg_com", "forma_juridica",
     "cod_caen", "caen_descriere", "caen_sectiune", "caen_sectiune_nume",
-    "telefon", "telefon_sursa", "email", "website",
+    "telefon", "telefon_sursa", "telefon_suspect", "email", "website",
     "judet", "localitate", "strada", "numar", "cod_postal", "adresa",
     "stare_inregistrare", "data_inregistrare", "inactiv",
     "platitor_tva", "tva_la_incasare", "split_tva", "ro_e_factura",
@@ -67,6 +67,10 @@ def add_filter_args(sp: argparse.ArgumentParser) -> None:
     sp.add_argument("--with-email", action="store_true")
     sp.add_argument("--platitor-tva", action="store_true")
     sp.add_argument("--active", action="store_true", help="exclude radiate/inactive")
+    sp.add_argument("--fara-suspecte", action="store_true",
+                    help="exclude telefoanele de formă (ex. 0770000000)")
+    sp.add_argument("--doar-verificate", action="store_true",
+                    help="doar firmele confirmate de ANAF")
     sp.add_argument("--min-salariati", type=int)
     sp.add_argument("--min-cifra", type=float, help="cifră de afaceri minimă")
     sp.add_argument("--dupa", help="înregistrate după data (YYYY-MM-DD)")
@@ -89,6 +93,8 @@ def filters_from_args(args) -> dict:
         with_email=True if args.with_email else None,
         platitor_tva=True if args.platitor_tva else None,
         doar_active=args.active,
+        fara_suspecte=args.fara_suspecte,
+        doar_verificate=args.doar_verificate,
         min_salariati=args.min_salariati,
         min_cifra_afaceri=args.min_cifra,
         inregistrata_dupa=args.dupa,
@@ -103,8 +109,65 @@ def filters_from_args(args) -> dict:
 # Comenzi                                                                       #
 # --------------------------------------------------------------------------- #
 
+def source_options(args) -> dict:
+    """Opțiunile de filtrare a sursei (an / dată / CUI minim)."""
+    opts = {}
+    dupa = args.dupa or (f"{args.an}-01-01" if args.an else None)
+    if dupa:
+        opts["dupa"] = dupa
+    if args.cui_min:
+        opts["cui_min"] = args.cui_min
+    return opts
+
+
 def cmd_collect(args, cfg, db):
-    Pipeline(cfg, db).collect(args.source)
+    Pipeline(cfg, db).collect(args.source, **source_options(args))
+
+
+def cmd_probe(args, cfg, db):
+    """Verifică accesul la ANAF și ONRC și ce câmpuri întorc.
+
+    Implicit NU afișează date de contact (sigur pentru loguri publice).
+    """
+    from firme.sources.onrc_opendata import OnrcOpenDataSource
+
+    ok = True
+    session = ThrottledSession(min_interval=cfg.anaf_min_interval,
+                               timeout=cfg.http_timeout, user_agent=cfg.user_agent)
+    client = AnafClient(cfg, session)
+    cuis = args.cui or [55625503, 55625490, 55622590]
+    print(f"ANAF: {client.endpoint}")
+    try:
+        body = client.query_raw(cuis)
+        found = body.get("found") or []
+        print(f"  răspuns OK: {len(found)} găsite din {len(cuis)}")
+        if found:
+            general = found[0].get("date_generale") or {}
+            print(f"  secțiuni: {', '.join(sorted(found[0].keys()))}")
+            print(f"  câmpuri date_generale: {', '.join(sorted(general.keys()))}")
+            tel = [str((e.get('date_generale') or {}).get('telefon') or '').strip() for e in found]
+            print(f"  câmpul 'telefon' există: {'telefon' in general}; "
+                  f"completat la {sum(1 for t in tel if t)} din {len(found)}")
+            if args.arata:
+                for e in found:
+                    g = e.get("date_generale") or {}
+                    print(f"    {g.get('cui')} {g.get('denumire')} | tel: {g.get('telefon')}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  EROARE ANAF: {exc}")
+        ok = False
+
+    try:
+        src = OnrcOpenDataSource(cfg, ThrottledSession(timeout=cfg.http_timeout,
+                                                       user_agent=cfg.user_agent))
+        url, title = src.discover()
+        print(f"ONRC: {title}\n  URL: {url}")
+        print(f"  coloane: {', '.join(src.read_header(url))}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  EROARE ONRC: {exc}")
+        ok = False
+
+    if not ok:
+        sys.exit(1)
 
 
 def cmd_enrich(args, cfg, db):
@@ -120,7 +183,8 @@ def cmd_bilant(args, cfg, db):
 
 
 def cmd_run(args, cfg, db):
-    print(f"\nRezultat: {Pipeline(cfg, db).run_all(args.source, limit=args.limit)}")
+    result = Pipeline(cfg, db).run_all(args.source, limit=args.limit, **source_options(args))
+    print(f"\nRezultat: {result}")
 
 
 def cmd_import(args, cfg, db):
@@ -240,9 +304,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="command", required=True)
 
+    def add_source_args(sp):
+        sp.add_argument("--source", default="onrc", choices=["onrc", "monitorul_oficial"])
+        sp.add_argument("--an", type=int, help="doar firmele înmatriculate din acest an (ex. 2026)")
+        sp.add_argument("--dupa", help="doar firmele înmatriculate după data YYYY-MM-DD")
+        sp.add_argument("--cui-min", type=int, help="filtru de rezervă: CUI minim")
+
     sp = sub.add_parser("collect", help="colectează firme noi dintr-o sursă")
-    sp.add_argument("--source", default="onrc", choices=["onrc", "monitorul_oficial"])
+    add_source_args(sp)
     sp.set_defaults(func=cmd_collect)
+
+    sp = sub.add_parser("probe", help="verifică accesul la ANAF și ONRC (fără date personale)")
+    sp.add_argument("--cui", type=int, action="append", help="CUI de test (se poate repeta)")
+    sp.add_argument("--arata", action="store_true", help="afișează și telefoanele (doar local)")
+    sp.set_defaults(func=cmd_probe)
 
     sp = sub.add_parser("enrich", help="date generale de la ANAF")
     sp.add_argument("--limit", type=int)
@@ -258,7 +333,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_bilant)
 
     sp = sub.add_parser("run", help="collect + enrich + phones")
-    sp.add_argument("--source", default="onrc", choices=["onrc", "monitorul_oficial"])
+    add_source_args(sp)
     sp.add_argument("--limit", type=int)
     sp.set_defaults(func=cmd_run)
 

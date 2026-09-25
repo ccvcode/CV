@@ -83,6 +83,46 @@ def extract_phone(text: Optional[str]) -> Optional[str]:
     return None
 
 
+_INTL_RE = re.compile(r"(?:\+|\b00)(\d[\d\s.\-/()]{6,20}\d)")
+
+
+def clean_phone(raw) -> Optional[str]:
+    """Primul număr utilizabil dintr-un câmp de telefon completat liber.
+
+    Câmpul ANAF e text liber: poate conține mai multe numere, separatoare
+    diverse sau numere din străinătate. Regula:
+      - număr românesc  -> 0XXXXXXXXX
+      - număr străin    -> +<cifre>   (ex. +37360696333, fondatori din Moldova)
+      - altceva         -> None
+    """
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    ro = extract_phone(text) or normalize_phone(text)
+    if ro:
+        return ro
+    match = _INTL_RE.search(text)
+    if match:
+        digits = re.sub(r"\D", "", match.group(1))
+        if 8 <= len(digits) <= 15 and not digits.startswith("40"):
+            return "+" + digits
+    return None
+
+
+_SEQUENCES = {"1234567", "2345678", "3456789", "7654321", "8765432", "9876543"}
+
+
+def is_suspect_phone(phone: Optional[str]) -> bool:
+    """Semnalează numerele care sunt aproape sigur completate de formă
+    (ex. 0770000000, 0722222222, 0712345678). Nu le ștergem, doar le marcăm."""
+    if not phone:
+        return False
+    tail = re.sub(r"\D", "", phone)[-7:]
+    return len(tail) == 7 and (len(set(tail)) == 1 or tail in _SEQUENCES)
+
+
 # --------------------------------------------------------------------------- #
 # HTTP                                                                          #
 # --------------------------------------------------------------------------- #

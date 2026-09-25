@@ -5,6 +5,7 @@
 data/
 downloads/
 export/
+out/
 
 # Secrete / configurare locală
 .env
