@@ -19,9 +19,10 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
   }
-  await getState();
+  const before = (await getState()).updatedAt;
   await refresh();
-  revalidatePath("/", "layout");
-  const s = await getState();
-  return NextResponse.json({ ok: true, updatedAt: s.updatedAt, articles: s.articles.length, sourcesOk: s.sourcesOk, sourcesTotal: s.sourcesTotal });
+  const after = await getState();
+  // Invalidăm paginile ISR doar la cereri autorizate și doar dacă s-au adus știri noi.
+  if (secret && after.updatedAt !== before) revalidatePath("/", "layout");
+  return NextResponse.json({ ok: true, updatedAt: after.updatedAt, articles: after.articles.length, sourcesOk: after.sourcesOk, sourcesTotal: after.sourcesTotal });
 }

@@ -32,7 +32,8 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export const revalidate = 300;
+// Știrile stau în memoria serverului, deci randarea e rapidă: servim mereu varianta la zi.
+export const dynamic = "force-dynamic";
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const [state, rates, weather] = await Promise.all([getState(), getRates(), getWeather()]);

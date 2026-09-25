@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { CloudSun } from "lucide-react";
 import type { CityWeather, RatesData } from "@/lib/widgets";
-import { formatLongDate } from "@/lib/utils";
-import { TimeAgo } from "./TimeAgo";
+import { TimeAgo, Today } from "./TimeAgo";
 
 export function UtilityBar({ rates, weather, updatedAt, sourcesOk }: { rates: RatesData | null; weather: CityWeather[] | null; updatedAt: number; sourcesOk: number }) {
   const eur = rates?.rates.find((r) => r.code === "EUR");
@@ -10,9 +9,7 @@ export function UtilityBar({ rates, weather, updatedAt, sourcesOk }: { rates: Ra
   const buc = weather?.[0];
   return (
     <div className="mx-auto flex max-w-7xl items-center gap-4 overflow-hidden px-4 py-1.5 text-xs text-ink-muted sm:px-6">
-      <span className="shrink-0 font-medium capitalize text-ink" suppressHydrationWarning>
-        {formatLongDate(Date.now())}
-      </span>
+      <Today className="shrink-0 font-medium capitalize text-ink" />
       {buc && (
         <span className="hidden shrink-0 items-center gap-1 sm:inline-flex">
           <CloudSun className="h-3.5 w-3.5" /> București {buc.temp}°
@@ -31,7 +28,7 @@ export function UtilityBar({ rates, weather, updatedAt, sourcesOk }: { rates: Ra
       <span className="ml-auto inline-flex shrink-0 items-center gap-1.5">
         <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-live text-live" />
         <span className="hidden sm:inline">Actualizat</span> <TimeAgo ts={updatedAt} />
-        <span className="hidden lg:inline">· {sourcesOk} surse active</span>
+        <span className="hidden lg:inline">· {sourcesOk === 1 ? "o sursă activă" : `${sourcesOk} surse active`}</span>
       </span>
     </div>
   );

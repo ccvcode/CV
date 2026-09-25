@@ -72,7 +72,7 @@ export function WeatherWidget({ data }: { data: CityWeather[] }) {
       <div className="mt-4 grid grid-cols-4 gap-2 border-t border-white/20 pt-4">
         {w.daily.map((d, j) => (
           <div key={d.date} className="text-center text-xs">
-            <div className="font-semibold capitalize text-white/85">{j === 0 ? "Azi" : DAY.format(new Date(d.date + "T12:00:00"))}</div>
+            <div className="font-semibold capitalize text-white/85">{j === 0 ? "Azi" : DAY.format(new Date(d.date + "T12:00:00Z"))}</div>
             <WeatherIcon code={d.code} className="mx-auto my-1.5 h-6 w-6" />
             <div className="tabular-nums"><b>{d.max}°</b> <span className="text-white/65">{d.min}°</span></div>
           </div>
@@ -102,7 +102,7 @@ export function RatesWidget({ data }: { data: RatesData }) {
     <div id="curs" className="scroll-mt-32 rounded-3xl border border-line bg-surface p-5">
       <div className="flex items-baseline justify-between">
         <h3 className="font-display text-lg font-bold">Curs valutar BNR</h3>
-        <span className="text-xs text-ink-muted">{new Date(data.date + "T12:00:00").toLocaleDateString("ro-RO", { day: "numeric", month: "long" })}</span>
+        <span className="text-xs text-ink-muted">{new Date(data.date + "T12:00:00Z").toLocaleDateString("ro-RO", { day: "numeric", month: "long", timeZone: "Europe/Bucharest" })}</span>
       </div>
       <ul className="mt-3 divide-y divide-line">
         {data.rates.map((r) => {

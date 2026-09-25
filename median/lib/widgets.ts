@@ -130,12 +130,12 @@ export async function getQuakes(): Promise<Quake[] | null> {
     `&minlatitude=43.5&maxlatitude=48.3&minlongitude=20.2&maxlongitude=29.7&minmagnitude=2.5&orderby=time&limit=6`;
   try {
     const data = JSON.parse(await getText(url, 900)) as {
-      features: { id: string; properties: { mag: number; place: string; time: number; url: string }; geometry: { coordinates: number[] } }[];
+      features: { id: string; properties: { mag: number; place: string | null; time: number; url: string }; geometry: { coordinates: number[] } }[];
     };
     return data.features.map((f) => ({
       id: f.id,
       mag: f.properties.mag,
-      place: f.properties.place.replace(/, Romania$/, ""),
+      place: (f.properties.place ?? "Zona României").replace(/, Romania$/, ""),
       time: f.properties.time,
       depth: Math.round(f.geometry.coordinates[2]),
       url: f.properties.url,

@@ -1,8 +1,8 @@
 /**
  * Colectare automată în fundal: la pornirea serverului (next start / Docker / VPS)
  * pornim un ceas care preia știrile din toate sursele la fiecare 5 minute,
- * independent de trafic. Pe platforme serverless (Vercel), paginile folosesc
- * în plus ISR cu revalidate = 300s și un cron care apelează /api/refresh.
+ * independent de trafic. Pe platforme serverless (Vercel), colectarea pornește
+ * la prima cerere după 5 minute, plus un cron opțional care apelează /api/refresh.
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;

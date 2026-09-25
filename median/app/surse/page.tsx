@@ -5,7 +5,8 @@ import { CATEGORY_MAP } from "@/lib/categories";
 import { OUTLETS } from "@/lib/sources";
 import { getSourceStatus, getState } from "@/lib/store";
 
-export const revalidate = 300;
+// Știrile stau în memoria serverului, deci randarea e rapidă: servim mereu varianta la zi.
+export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Sursele noastre", description: "Lista completă a publicațiilor și fluxurilor RSS agregate de Median." };
 
 const KIND: Record<string, string> = { tv: "Televiziune", online: "Publicație online", agentie: "Agenție de presă", presa: "Presă scrisă", international: "Serviciu internațional" };

@@ -3,7 +3,8 @@ import { LiveFeed } from "@/components/LiveFeed";
 import { LiveUpdater } from "@/components/LiveUpdater";
 import { getState } from "@/lib/store";
 
-export const revalidate = 300;
+// Știrile stau în memoria serverului, deci randarea e rapidă: servim mereu varianta la zi.
+export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Pe scurt — știri live, minut cu minut", description: "Toate știrile preluate de Median, în ordine cronologică, actualizate automat la fiecare 5 minute." };
 
 export default async function Live() {

@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
   // Imaginile vin de pe zeci de domenii diferite (sursele RSS), așa că
   // folosim <img> simplu în loc de optimizarea next/image.
   images: { unoptimized: true },
+  serverExternalPackages: ["undici"],
 };
 
 export default nextConfig;

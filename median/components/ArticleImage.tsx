@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CATEGORY_MAP } from "@/lib/categories";
 import type { CategorySlug } from "@/lib/types";
 import { cx } from "@/lib/utils";
@@ -18,6 +18,12 @@ interface Props {
 /** Imagine de articol cu fallback elegant (gradient în culoarea categoriei) dacă lipsește sau nu se încarcă. */
 export function ArticleImage({ src, alt, category, className, priority, zoom = true }: Props) {
   const [failed, setFailed] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
+  // Dacă imaginea a eșuat înainte de hidratare, onError nu mai apucă să ruleze.
+  useEffect(() => {
+    const img = imgRef.current;
+    if (img && img.complete && img.naturalWidth === 0) setFailed(true);
+  }, [src]);
   const color = CATEGORY_MAP[category]?.color ?? "#3A2BFF";
   // Când imaginea e folosită ca fundal (absolute), nu adăugăm „relative”, care ar anula poziționarea.
   const position = className?.includes("absolute") ? "" : "relative";
@@ -38,6 +44,7 @@ export function ArticleImage({ src, alt, category, className, priority, zoom = t
     <div className={cx(position, "overflow-hidden bg-surface-2", className)}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
+        ref={imgRef}
         src={src}
         alt={alt}
         loading={priority ? "eager" : "lazy"}

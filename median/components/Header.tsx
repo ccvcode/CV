@@ -105,7 +105,7 @@ export function Header({ utility }: { utility: React.ReactNode }) {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Caută în mii de știri din toate sursele…"
-                className="h-16 flex-1 bg-transparent text-lg outline-none placeholder:text-ink-faint"
+                className="h-16 min-w-0 flex-1 bg-transparent text-lg outline-none placeholder:text-ink-faint"
                 aria-label="Termen de căutare"
               />
               <button type="button" onClick={() => setSearchOpen(false)} className="rounded-full p-1.5 text-ink-muted hover:bg-surface-2" aria-label="Închide">

@@ -14,11 +14,9 @@ import { CATEGORY_MAP } from "@/lib/categories";
 import { getArticle, getArticles, getCluster } from "@/lib/store";
 import { articleHref, formatLongDate, formatTime } from "@/lib/utils";
 
-export const revalidate = 300;
-
-export function generateStaticParams() {
-  return [];
-}
+// Randare la cerere: pe instanțe diferite (serverless) un articol nou poate lipsi din
+// memoria locală, iar un 404 salvat în cache-ul ISR ar ascunde articolul 5 minute.
+export const dynamic = "force-dynamic";
 
 async function load(param: string) {
   const id = decodeURIComponent(param).split("-")[0];

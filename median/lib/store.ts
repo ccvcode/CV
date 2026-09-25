@@ -7,6 +7,7 @@ import { parseFeed } from "./rss";
 import { buildDemoArticles } from "./demo";
 import { assignClusters } from "./cluster";
 import type { Article, CategorySlug, Cluster, NewsState } from "./types";
+import { fetch as undiciFetch } from "undici";
 import { decodeEntities } from "./utils";
 
 /** Intervalul de colectare automată: 5 minute. */
@@ -24,6 +25,10 @@ interface Store {
   sourcesOk: number;
   sourceStatus: Record<string, { ok: boolean; count: number; at: number; error?: string; fails?: number }>;
   views: Record<string, number>;
+  /** Articole pentru care am căutat deja og:image fără succes (nu le mai descărcăm). */
+  noImg: Set<string>;
+  /** Momentul ultimei încercări de colectare (reușită sau nu). */
+  attemptedAt: number;
   loaded: boolean;
   refreshing: Promise<void> | null;
   sorted: Article[] | null;
@@ -38,6 +43,8 @@ const store: Store = (g.__median ??= {
   sourcesOk: 0,
   sourceStatus: {},
   views: {},
+  noImg: new Set(),
+  attemptedAt: 0,
   loaded: false,
   refreshing: null,
   sorted: null,
@@ -48,16 +55,27 @@ function dataDir(): string {
   return process.env.MEDIAN_DATA_DIR || (process.env.VERCEL ? path.join(os.tmpdir(), "median") : path.join(process.cwd(), ".cache"));
 }
 
-async function loadFromDisk() {
-  if (store.loaded) return;
-  store.loaded = true;
+let diskLoad: Promise<void> | null = null;
+function loadFromDisk(): Promise<void> {
+  if (store.loaded) return Promise.resolve();
+  return (diskLoad ??= readDisk().finally(() => {
+    store.loaded = true;
+  }));
+}
+
+async function readDisk() {
   try {
     const raw = await fs.readFile(path.join(dataDir(), "news.json"), "utf8");
     const data = JSON.parse(raw) as { articles: Article[]; updatedAt: number; views?: Record<string, number>; sourceStatus?: Store["sourceStatus"] };
-    for (const a of data.articles) store.articles.set(a.id, a);
-    store.updatedAt = data.updatedAt || 0;
-    store.views = data.views ?? {};
-    store.sourceStatus = data.sourceStatus ?? {};
+    // Colectarea poate fi rulat deja înainte de citirea de pe disc: nu suprascriem date mai noi.
+    if (store.demo && data.articles.length) {
+      store.articles.clear();
+      store.demo = false;
+    }
+    for (const a of data.articles) if (!store.articles.has(a.id)) store.articles.set(a.id, a);
+    store.updatedAt = Math.max(store.updatedAt, data.updatedAt || 0);
+    store.views = { ...(data.views ?? {}), ...store.views };
+    store.sourceStatus = { ...(data.sourceStatus ?? {}), ...store.sourceStatus };
     store.sourcesOk = Object.values(store.sourceStatus).filter((s) => s.ok).length;
     invalidate();
   } catch {
@@ -91,24 +109,49 @@ function invalidate() {
   store.clusters = null;
 }
 
-async function fetchText(url: string, timeout = FEED_TIMEOUT_MS, maxBytes = 3_000_000): Promise<string> {
+/**
+ * Descarcă un URL ca text. Folosim fetch-ul din undici (nu cel global, pe care Next.js
+ * îl interceptează pentru cache): colectarea poate rula și în timpul regenerării ISR
+ * a unei pagini, iar un fetch „no-store” acolo ar fi transformat de Next într-o eroare.
+ * Citirea se oprește după `maxBytes` (sau după </head> pentru paginile HTML).
+ */
+async function fetchText(url: string, timeout = FEED_TIMEOUT_MS, maxBytes = 3_000_000, stopAtHead = false): Promise<string> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeout);
   try {
-    const res = await fetch(url, {
+    const res = await undiciFetch(url, {
       signal: ctrl.signal,
       headers: { "user-agent": UA, accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html;q=0.8, */*;q=0.5" },
       redirect: "follow",
-      cache: "no-store",
     });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const buf = await res.arrayBuffer();
-    const bytes = new Uint8Array(buf.byteLength > maxBytes ? buf.slice(0, maxBytes) : buf);
+    if (!res.ok || !res.body) throw new Error("HTTP " + res.status);
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    const probe = new TextDecoder("latin1");
+    while (size < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      size += value.byteLength;
+      if (stopAtHead && /<\/head>/i.test(probe.decode(value))) break;
+    }
+    ctrl.abort();
+    const bytes = new Uint8Array(Math.min(size, maxBytes));
+    let off = 0;
+    for (const c of chunks) {
+      const part = c.subarray(0, Math.min(c.byteLength, bytes.byteLength - off));
+      bytes.set(part, off);
+      off += part.byteLength;
+      if (off >= bytes.byteLength) break;
+    }
     const ct = res.headers.get("content-type") || "";
-    const head = new TextDecoder("latin1").decode(bytes.slice(0, 300));
-    const enc = /charset=([\w-]+)/i.exec(ct)?.[1] || /encoding=["']([\w-]+)["']/i.exec(head)?.[1] || "utf-8";
+    const head = new TextDecoder("latin1").decode(bytes.subarray(0, 300));
+    let enc = (/charset=([\w-]+)/i.exec(ct)?.[1] || /encoding=["']([\w-]+)["']/i.exec(head)?.[1] || "utf-8").toLowerCase();
+    // Node nu are ISO-8859-16 (standardul românesc); ISO-8859-2 e cea mai apropiată codificare.
+    if (enc === "iso-8859-16") enc = "iso-8859-2";
     try {
-      return new TextDecoder(enc.toLowerCase()).decode(bytes);
+      return new TextDecoder(enc).decode(bytes);
     } catch {
       return new TextDecoder("utf-8").decode(bytes);
     }
@@ -126,24 +169,32 @@ async function pool<T>(items: T[], limit: number, fn: (x: T) => Promise<void>) {
   );
 }
 
+/** Domeniul „principal” (ultimele două etichete), ex. www.digi24.ro -> digi24.ro. */
+function rootDomain(host: string): string {
+  return host.toLowerCase().split(".").slice(-2).join(".");
+}
+
 /** Pentru articolele fără imagine în RSS, încercăm og:image din pagina articolului. */
 async function enrichImages(articles: Article[]) {
   const missing = articles
-    .filter((a) => !a.image && !(a as Article & { _noImg?: boolean })._noImg)
+    .filter((a) => !a.image && !store.noImg.has(a.id))
     .sort((a, b) => b.published - a.published)
     .slice(0, 40);
   await pool(missing, 8, async (a) => {
     try {
-      const html = await fetchText(a.link, 6000, 400_000);
+      // Descărcăm doar pagini de pe domeniul sursei (fără adrese interne sau străine).
+      const link = new URL(a.link);
+      if (rootDomain(link.hostname) !== rootDomain(new URL(a.sourceSite).hostname)) throw new Error("domeniu străin");
+      const html = await fetchText(a.link, 6000, 400_000, true);
       const m =
         /<meta[^>]+property=["']og:image(?::url)?["'][^>]+content=["']([^"']+)["']/i.exec(html) ||
         /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::url)?["']/i.exec(html) ||
         /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i.exec(html);
       const img = m ? new URL(decodeEntities(m[1]), a.link) : null;
       if (img && (img.protocol === "https:" || img.protocol === "http:")) a.image = img.toString().replace(/^http:\/\//, "https://");
-      else (a as Article & { _noImg?: boolean })._noImg = true;
+      else store.noImg.add(a.id);
     } catch {
-      (a as Article & { _noImg?: boolean })._noImg = true;
+      store.noImg.add(a.id);
     }
   });
 }
@@ -151,7 +202,9 @@ async function enrichImages(articles: Article[]) {
 export async function refresh(): Promise<void> {
   if (store.refreshing) return store.refreshing;
   store.refreshing = (async () => {
+    await loadFromDisk();
     const now = Date.now();
+    store.attemptedAt = now;
     let ok = 0;
     const fresh: Article[] = [];
     // Sursele care au eșuat de 3 ori la rând sunt reîncercate doar o dată la 30 de minute.
@@ -211,9 +264,12 @@ export async function refresh(): Promise<void> {
       const all = [...store.articles.values()].sort((a, b) => b.published - a.published);
       for (const a of all.slice(MAX_ARTICLES)) store.articles.delete(a.id);
       for (const a of all) if (now - a.published > MAX_AGE_MS) store.articles.delete(a.id);
+      for (const id of Object.keys(store.views)) if (!store.articles.has(id)) delete store.views[id];
+      for (const id of store.noImg) if (!store.articles.has(id)) store.noImg.delete(id);
     }
     store.sourcesOk = ok;
-    store.updatedAt = now;
+    // „Actualizat acum” doar dacă am primit efectiv știri (sau suntem în modul demo).
+    if (ok > 0 || store.demo) store.updatedAt = now;
     invalidate();
     scheduleSave();
     console.log(`[median] colectare: ${ok}/${SOURCES.length} surse, ${fresh.length} articole, total ${store.articles.size}`);
@@ -225,7 +281,7 @@ export async function refresh(): Promise<void> {
 
 async function ensureFresh() {
   await loadFromDisk();
-  const stale = Date.now() - store.updatedAt > REFRESH_MS;
+  const stale = Date.now() - Math.max(store.updatedAt, store.attemptedAt) > REFRESH_MS;
   if (store.articles.size === 0) await refresh();
   else if (stale) {
     // Avem date vechi: așteptăm colectarea cel mult 12 secunde, apoi servim ce avem.
@@ -259,7 +315,7 @@ export async function getArticles(opts: { category?: CategorySlug; limit?: numbe
   let list = articles;
   if (opts.category) list = list.filter((a) => a.category === opts.category);
   if (opts.source) list = list.filter((a) => a.sourceId === opts.source);
-  if (opts.since) list = list.filter((a) => a.fetched > opts.since! || a.published > opts.since!);
+  if (opts.since) list = list.filter((a) => a.fetched > opts.since!);
   return opts.limit ? list.slice(0, opts.limit) : list;
 }
 
@@ -322,8 +378,15 @@ export async function search(q: string, limit = 60): Promise<Article[]> {
   return scored.sort((x, y) => y.s - x.s).slice(0, limit).map((x) => x.a);
 }
 
-export function recordView(id: string) {
+const viewSeen = new Set<string>();
+
+/** Înregistrează o vizualizare; fiecare vizitator (după IP) contează o singură dată per articol. */
+export function recordView(id: string, visitor = "") {
   if (!store.articles.has(id)) return;
+  const key = visitor + ":" + id;
+  if (viewSeen.has(key)) return;
+  if (viewSeen.size > 50_000) viewSeen.clear();
+  viewSeen.add(key);
   store.views[id] = (store.views[id] ?? 0) + 1;
   scheduleSave();
 }

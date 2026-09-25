@@ -51,7 +51,7 @@ Merge la fel pe Railway, Render sau Fly.io. Setează directorul rădăcină la `
 
 1. Importă repository-ul în Vercel și setează **Root Directory** = `median`.
 2. Adaugă variabilele `NEXT_PUBLIC_SITE_URL` și, opțional, `CRON_SECRET`.
-3. Paginile se regenerează automat la cel mult 5 minute (ISR, `revalidate = 300`).
+3. Știrile se colectează automat când datele sunt mai vechi de 5 minute (la prima vizită după acest interval).
 4. Opțional, pentru colectare strict la 5 minute indiferent de trafic, setează în GitHub secretele
    `MEDIAN_URL` și `CRON_SECRET`. Workflow-ul `.github/workflows/median-refresh.yml` va apela
    `/api/refresh` la fiecare 5 minute.

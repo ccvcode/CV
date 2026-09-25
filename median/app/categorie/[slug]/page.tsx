@@ -4,14 +4,11 @@ import { CategoryIcon } from "@/components/CategoryIcon";
 import { CompactCard, LeadCard, StandardCard, TimelineItem } from "@/components/Cards";
 import { LiveUpdater } from "@/components/LiveUpdater";
 import { SectionHeader } from "@/components/SectionHeader";
-import { CATEGORIES, getCategory } from "@/lib/categories";
+import { getCategory } from "@/lib/categories";
 import { getArticles, getClusters, getState } from "@/lib/store";
 
-export const revalidate = 300;
-
-export function generateStaticParams() {
-  return CATEGORIES.map((c) => ({ slug: c.slug }));
-}
+// Știrile stau în memoria serverului, deci randarea e rapidă: servim mereu varianta la zi.
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const c = getCategory((await params).slug);

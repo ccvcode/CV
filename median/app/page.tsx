@@ -12,7 +12,8 @@ import { getClusters, getMostRead, getState } from "@/lib/store";
 import type { Cluster } from "@/lib/types";
 import { getQuakes, getRates, getWeather } from "@/lib/widgets";
 
-export const revalidate = 300;
+// Știrile stau în memoria serverului, deci randarea e rapidă: servim mereu varianta la zi.
+export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const [state, clusters, mostRead, rates, weather, quakes] = await Promise.all([

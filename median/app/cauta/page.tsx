@@ -14,7 +14,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       <h1 className="font-display text-4xl font-black">Caută</h1>
       <form action="/cauta" className="mt-5 flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 focus-within:border-brand">
         <Search className="h-5 w-5 text-ink-muted" />
-        <input name="q" defaultValue={q} autoFocus={!q} placeholder="Ex: Guvern, BNR, Superliga…" className="h-14 flex-1 bg-transparent text-lg outline-none placeholder:text-ink-faint" />
+        <input name="q" defaultValue={q} autoFocus={!q} placeholder="Ex: Guvern, BNR, Superliga…" className="h-14 min-w-0 flex-1 bg-transparent text-lg outline-none placeholder:text-ink-faint" />
         <button className="rounded-xl bg-ink px-4 py-2 text-sm font-semibold text-bg">Caută</button>
       </form>
       {q && (

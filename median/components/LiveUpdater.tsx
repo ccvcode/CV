@@ -14,10 +14,12 @@ export function LiveUpdater({ since }: { since: number }) {
   const router = useRouter();
   const [count, setCount] = useState(0);
   const sinceRef = useRef(since);
+  const latestRef = useRef(since);
   const baseTitle = useRef<string>("");
 
   useEffect(() => {
-    sinceRef.current = since;
+    // Nu dăm înapoi dacă pagina din cache e mai veche decât ce am văzut deja.
+    sinceRef.current = Math.max(sinceRef.current, since);
     setCount(0);
   }, [since]);
 
@@ -29,7 +31,8 @@ export function LiveUpdater({ since }: { since: number }) {
       try {
         const res = await fetch(`/api/news?since=${sinceRef.current}&limit=50&fields=id`, { cache: "no-store" });
         if (!res.ok) return;
-        const data = (await res.json()) as { count: number };
+        const data = (await res.json()) as { count: number; updatedAt: number };
+        latestRef.current = data.updatedAt;
         if (!stop) setCount(data.count);
       } catch {}
     };
@@ -53,10 +56,11 @@ export function LiveUpdater({ since }: { since: number }) {
     <button
       onClick={() => {
         setCount(0);
+        sinceRef.current = Math.max(sinceRef.current, latestRef.current);
         window.scrollTo({ top: 0, behavior: "smooth" });
         router.refresh();
       }}
-      className="glass toast-in fixed left-1/2 top-24 z-50 inline-flex items-center gap-2 rounded-full border border-line px-4 py-2.5 text-sm font-semibold text-ink shadow-xl"
+      className="glass toast-in fixed left-1/2 top-32 z-50 inline-flex items-center gap-2 rounded-full border border-line px-4 py-2.5 text-sm font-semibold text-ink shadow-xl"
     >
       <span className="flex h-5 w-5 items-center justify-center rounded-full bg-brand text-white">
         <ArrowUp className="h-3.5 w-3.5" />

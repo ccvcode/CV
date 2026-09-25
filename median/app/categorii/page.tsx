@@ -4,7 +4,8 @@ import { CategoryIcon } from "@/components/CategoryIcon";
 import { CATEGORIES } from "@/lib/categories";
 import { getState } from "@/lib/store";
 
-export const revalidate = 300;
+// Știrile stau în memoria serverului, deci randarea e rapidă: servim mereu varianta la zi.
+export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Categorii" };
 
 export default async function Categories() {

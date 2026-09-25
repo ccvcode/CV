@@ -38,7 +38,22 @@ function attr(n: unknown, a: string): string {
   return "";
 }
 
-const IMG_RE = /<img[^>]+?(?:data-src|src)\s*=\s*["']([^"']+)["']/i;
+const IMG_TAG_RE = /<img\b[^>]*>/gi;
+const LAZY_ATTRS = ["data-src", "data-lazy-src", "data-original", "data-srcset", "srcset", "src"];
+
+/** Prima imagine reală din HTML — preferăm atributele lazy-load față de placeholder-ul din „src”. */
+function firstImg(html: string): string | undefined {
+  for (const tag of html.match(IMG_TAG_RE) ?? []) {
+    for (const attrName of LAZY_ATTRS) {
+      const m = new RegExp(`\\s${attrName}\\s*=\\s*["']([^"']+)["']`, "i").exec(tag);
+      if (!m) continue;
+      const url = m[1].trim().split(/\s+/)[0];
+      if (!url || url.startsWith("data:") || /(lazy|placeholder|blank|spacer)\.(gif|png|svg)/i.test(url)) continue;
+      return url;
+    }
+  }
+  return undefined;
+}
 
 function absolutize(url: string, base: string): string {
   if (!url) return "";
@@ -77,8 +92,8 @@ function extractImage(item: Record<string, unknown>, html: string, base: string)
   if (itunes) candidates.push(attr(itunes, "href"));
   const direct = item["image"];
   if (direct) candidates.push(typeof direct === "string" ? direct : text((direct as Record<string, unknown>)["url"]) || attr(direct, "url"));
-  const m = html.match(IMG_RE);
-  if (m) candidates.push(m[1]);
+  const inline = firstImg(html);
+  if (inline) candidates.push(inline);
   for (const c of candidates) {
     const u = absolutize(text(c), base);
     if (u && isLikelyImage(u)) return u.replace(/^http:\/\//, "https://");
@@ -86,14 +101,60 @@ function extractImage(item: Record<string, unknown>, html: string, base: string)
   return undefined;
 }
 
-function parseDate(s: string): number {
-  if (!s) return 0;
-  let t = Date.parse(s);
-  if (Number.isNaN(t)) {
-    // Unele feed-uri românești folosesc denumiri de luni/zile în română sau formate atipice.
-    t = Date.parse(s.replace(/\b(Lun|Mar|Mie|Joi|Vin|Sâm|Sam|Dum)\w*,?\s*/i, ""));
+const RO_MONTHS: Record<string, string> = {
+  ian: "Jan", feb: "Feb", mar: "Mar", apr: "Apr", mai: "May", iun: "Jun",
+  iul: "Jul", aug: "Aug", sep: "Sep", oct: "Oct", noi: "Nov", dec: "Dec",
+};
+
+/** Decalajul Europe/Bucharest față de UTC (în minute) la momentul dat. */
+function bucharestOffset(ts: number): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Bucharest", hourCycle: "h23",
+    year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric",
+  }).formatToParts(ts);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  return (Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute")) - Math.floor(ts / 60000) * 60000) / 60000;
+}
+
+function parseDate(raw: string): number {
+  if (!raw) return 0;
+  let s = raw.trim();
+  // Zile și luni în română („Joi, 14 noiembrie 2023”) -> engleză.
+  s = s.replace(/^(luni|marți|marti|miercuri|joi|vineri|sâmbătă|sambata|duminică|duminica|lun|mar|mie|joi|vin|sâm|sam|dum)\b\.?,?\s*/i, "");
+  s = s.replace(/\b(ian|feb|mar|apr|mai|iun|iul|aug|sep|oct|noi|dec)[a-zăâîșţț]*\.?/gi, (m, k: string) => RO_MONTHS[k.toLowerCase()] ?? m);
+  const hasZone = /(Z|[+-]\d{2}:?\d{2}|\b(GMT|UTC|EET|EEST|[ECMP][SD]T))\s*$/i.test(s);
+  const t = Date.parse(s);
+  if (Number.isNaN(t)) return 0;
+  // Fără fus orar explicit: presupunem ora României, nu ora serverului.
+  if (!hasZone) {
+    let asUtc = Date.parse(s + " UTC");
+    if (Number.isNaN(asUtc)) asUtc = Date.parse(s.replace(" ", "T") + "Z");
+    if (Number.isNaN(asUtc)) return t;
+    return asUtc - bucharestOffset(asUtc) * 60000;
   }
-  return Number.isNaN(t) ? 0 : t;
+  return t;
+}
+
+const TRACKING = /^(utm_\w+|fbclid|gclid|mc_cid|mc_eid|ref|ocid|cmpid|_ga)$/i;
+
+/** Link canonic pentru ID: fără fragment și fără parametri de tracking, dar păstrând restul query-ului. */
+function canonicalLink(link: string): string {
+  try {
+    const u = new URL(link);
+    u.hash = "";
+    for (const k of [...u.searchParams.keys()]) if (TRACKING.test(k)) u.searchParams.delete(k);
+    u.searchParams.sort();
+    return u.toString().replace(/\?$/, "");
+  } catch {
+    return link;
+  }
+}
+
+function authorOf(item: Record<string, unknown>): string {
+  const raw = text(item["dc:creator"]) || text((item["author"] as Record<string, unknown>)?.["name"]) || text(item["author"]);
+  // RSS <author> are adesea forma „email@site.ro (Nume Prenume)”.
+  const m = /\(([^)]+)\)/.exec(raw);
+  return cleanText(m ? m[1] : raw.includes("@") ? "" : raw);
 }
 
 function atomLink(entry: Record<string, unknown>): string {
@@ -119,7 +180,9 @@ export function parseFeed(xml: string, source: Source, now = Date.now()): Articl
 
   const out: Article[] = [];
   for (const item of items.slice(0, 60)) {
-    const link = absolutize(feed ? atomLink(item) : text(item["link"]) || text(item["guid"]), source.site);
+    const guid = item["guid"];
+    const guidLink = guid && attr(guid, "isPermaLink") !== "false" && /^https?:/i.test(text(guid)) ? text(guid) : "";
+    const link = absolutize(feed ? atomLink(item) : text(item["link"]) || guidLink, source.site);
     const title = truncate(cleanText(text(item["title"])), 220);
     if (!link || !title) continue;
     const contentHtml = text(item["content:encoded"]) || text(item["content"]) || "";
@@ -131,9 +194,9 @@ export function parseFeed(xml: string, source: Source, now = Date.now()): Articl
     const published =
       parseDate(text(item["pubDate"]) || text(item["published"]) || text(item["updated"]) || text(item["dc:date"])) || now;
     const image = extractImage(item, html, source.site);
-    const author = cleanText(text(item["dc:creator"]) || text((item["author"] as Record<string, unknown>)?.["name"]) || "") || undefined;
+    const author = authorOf(item) || undefined;
     out.push({
-      id: hashId(link.replace(/[?#].*$/, "")),
+      id: hashId(canonicalLink(link)),
       slug: slugify(title, 70),
       title: fixDiacritics(title),
       summary: summary === title ? "" : summary,
