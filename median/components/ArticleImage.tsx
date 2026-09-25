@@ -19,10 +19,12 @@ interface Props {
 export function ArticleImage({ src, alt, category, className, priority, zoom = true }: Props) {
   const [failed, setFailed] = useState(false);
   const color = CATEGORY_MAP[category]?.color ?? "#3A2BFF";
+  // Când imaginea e folosită ca fundal (absolute), nu adăugăm „relative”, care ar anula poziționarea.
+  const position = className?.includes("absolute") ? "" : "relative";
   if (!src || failed) {
     return (
       <div
-        className={cx("relative flex items-center justify-center overflow-hidden", className)}
+        className={cx(position, "flex items-center justify-center overflow-hidden", className)}
         style={{
           background: `radial-gradient(120% 120% at 0% 0%, ${color}55 0%, transparent 55%), radial-gradient(100% 100% at 100% 100%, ${color}40 0%, transparent 60%), linear-gradient(135deg, ${color}22, ${color}0d)`,
         }}
@@ -33,7 +35,7 @@ export function ArticleImage({ src, alt, category, className, priority, zoom = t
     );
   }
   return (
-    <div className={cx("relative overflow-hidden bg-surface-2", className)}>
+    <div className={cx(position, "overflow-hidden bg-surface-2", className)}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={src}
