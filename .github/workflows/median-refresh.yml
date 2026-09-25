@@ -1,0 +1,27 @@
+# Declanșează colectarea știrilor Median la fiecare 5 minute (util pe hosting serverless,
+# de ex. Vercel, unde nu există un proces care să ruleze permanent).
+# Configurare: Settings → Secrets and variables → Actions →
+#   MEDIAN_URL   = adresa site-ului, ex. https://median.vercel.app
+#   CRON_SECRET  = aceeași valoare ca variabila CRON_SECRET de pe server (opțional)
+name: Median — colectare știri
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Apelează /api/refresh
+        env:
+          MEDIAN_URL: ${{ secrets.MEDIAN_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$MEDIAN_URL" ]; then
+            echo "Secretul MEDIAN_URL nu este setat — sar peste."
+            exit 0
+          fi
+          curl -fsS --max-time 90 -H "Authorization: Bearer $CRON_SECRET" "$MEDIAN_URL/api/refresh"
