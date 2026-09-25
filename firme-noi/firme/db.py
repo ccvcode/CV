@@ -87,7 +87,9 @@ class Database:
         self.path = str(path)
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA journal_mode=WAL;")
+        # DELETE (nu WAL): fișierul .db e mereu complet după fiecare commit, deci
+        # poate fi copiat/salvat în cache oricând, chiar la o rulare întreruptă.
+        self.conn.execute("PRAGMA journal_mode=DELETE;")
         self.conn.execute(_create_table_sql())
         self.conn.executescript(_OTHER_TABLES)
         for idx in _INDEXES:

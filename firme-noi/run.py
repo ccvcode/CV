@@ -119,11 +119,20 @@ def source_options(args) -> dict:
         opts["cui_min"] = args.cui_min
     if getattr(args, "seed", None):
         opts["seed"] = args.seed
+    if getattr(args, "max_batches", None):
+        opts["max_batches"] = args.max_batches
     return opts
 
 
 def cmd_collect(args, cfg, db):
-    Pipeline(cfg, db).collect(args.source, **source_options(args))
+    pipeline = Pipeline(cfg, db)
+    pipeline.collect(args.source, **source_options(args))
+    complete = getattr(pipeline.last_source, "complete", None)
+    if complete is not None:
+        # Folosit de workflow ca să decidă dacă mai pornește o tranșă.
+        status = "complete" if complete else "partial"
+        (Path(cfg.db_path).parent / "scan_status.txt").write_text(status + "\n", encoding="utf-8")
+        print(f"Stare scanare: {status}")
 
 
 def cmd_probe(args, cfg, db):
@@ -157,6 +166,11 @@ def cmd_probe(args, cfg, db):
     except Exception as exc:  # noqa: BLE001
         print(f"  EROARE ANAF: {exc}")
         ok = False
+
+    if args.doar_anaf:
+        if not ok:
+            sys.exit(1)
+        return
 
     try:
         src = OnrcOpenDataSource(cfg, ThrottledSession(timeout=cfg.http_timeout,
@@ -314,6 +328,8 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--dupa", help="doar firmele înmatriculate după data YYYY-MM-DD")
         sp.add_argument("--cui-min", type=int, help="filtru de rezervă (onrc): CUI minim")
         sp.add_argument("--seed", type=int, help="anaf_scan: CUI recent de la care pornește scanarea")
+        sp.add_argument("--max-batches", type=int,
+                        help="anaf_scan: câte loturi de 100 CUI pe rulare (restul continuă data viitoare)")
 
     sp = sub.add_parser("collect", help="colectează firme noi dintr-o sursă")
     add_source_args(sp)
@@ -322,6 +338,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("probe", help="verifică accesul la ANAF și ONRC (fără date personale)")
     sp.add_argument("--cui", type=int, action="append", help="CUI de test (se poate repeta)")
     sp.add_argument("--arata", action="store_true", help="afișează și telefoanele (doar local)")
+    sp.add_argument("--doar-anaf", action="store_true", help="nu verifica ONRC (data.gov.ro)")
     sp.set_defaults(func=cmd_probe)
 
     sp = sub.add_parser("enrich", help="date generale de la ANAF")

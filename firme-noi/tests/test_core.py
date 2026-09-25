@@ -356,6 +356,73 @@ class TestAnafScan(unittest.TestCase):
         self.assertIn(1201, bases)
         self.assertEqual(src.missed, [])
 
+    def test_anaf_404_means_none_found(self):
+        # Bug real din rularea #3: ANAF răspunde 404 când niciun CUI nu există;
+        # era tratat ca eroare, iar scanarea în sus nu se mai oprea.
+        from firme.config import Config
+
+        class Resp:
+            status_code = 404
+            def json(self):
+                raise ValueError("fără corp JSON")
+            def raise_for_status(self):
+                raise AssertionError("404 nu trebuie tratat ca eroare")
+
+        class Session:
+            def post(self, *a, **k):
+                return Resp()
+
+        client = AnafClient(Config(), Session())
+        batches = list(client.lookup_batches([55670261, 55670278]))
+        self.assertEqual(len(batches), 1)
+        _, found, not_found, ok = batches[0]
+        self.assertTrue(ok)
+        self.assertEqual(found, {})
+        self.assertEqual(not_found, {55670261, 55670278})
+
+    def test_stray_recent_company_in_old_range_does_not_extend_scan(self):
+        from firme.sources.anaf_scan import cui_from_base
+        client, _ = self._fake_client()
+        # Firme vechi (interval 2025) cu dată din 2026, ex. mutare de sediu.
+        strays = (1085, 1075)
+        original = client.lookup_batches
+
+        def with_strays(cuis):
+            for batch, found, nf, ok in original(cuis):
+                for base in strays:
+                    cui = cui_from_base(base)
+                    if cui in found:
+                        found[cui].data_inregistrare = "2026-05-05"
+                yield batch, found, nf, ok
+        client.lookup_batches = with_strays
+        src = self._source(client)
+        bases = sorted(c.cui // 10 for c in src.collect())
+        self.assertTrue(src.complete)
+        # Lotul 1081–1090 are 1 firmă recentă din 10 (<30%) → contează ca „vechi";
+        # scanarea se oprește după 2 astfel de loturi și nu mai ajunge la 1075.
+        self.assertIn(1085, bases)
+        self.assertNotIn(1075, bases)
+        self.assertEqual([b for b in bases if b >= 1100], list(range(1100, 1251)))
+
+    def test_budget_splits_scan_and_resumes(self):
+        from firme.sources.anaf_scan import cui_from_base
+        client, _ = self._fake_client()
+        first = self._source(client, max_batches=8)
+        got = [c.cui for c in first.collect()]
+        self.assertFalse(first.complete)
+        second = self._source(client, known_min=min(got), known_max=max(got))
+        got += [c.cui for c in second.collect()]
+        self.assertTrue(second.complete)
+        self.assertEqual(sorted({c // 10 for c in got}), list(range(1100, 1251)))
+
+    def test_anaf_down_stops_run_quickly(self):
+        class Down:
+            def lookup_batches(self, cuis):
+                yield list(cuis), {}, set(), False
+        src = self._source(Down())
+        with self.assertRaises(RuntimeError):
+            list(src.collect())
+
     def test_incremental_run_only_scans_new(self):
         from firme.sources.anaf_scan import cui_from_base
         client, _ = self._fake_client(max_base=1260)

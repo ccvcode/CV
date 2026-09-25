@@ -50,17 +50,22 @@ class Pipeline:
             options.setdefault("known_min", known_min)
             options.setdefault("known_max", known_max)
         source = source_cls(self.config, self._session(min_interval=0.0), **options)
+        self.last_source = source
 
         noi = vazute = 0
         buf: list[Company] = []
-        for company in source.collect():
-            vazute += 1
-            buf.append(company)
-            if len(buf) >= 5000:
-                noi += self.db.insert_many(buf)
-                buf = []
-                log.info("Citite %d firme din sursă (%d noi)...", vazute, noi)
-        noi += self.db.insert_many(buf)
+        try:
+            for company in source.collect():
+                vazute += 1
+                buf.append(company)
+                if len(buf) >= 1000:
+                    noi += self.db.insert_many(buf)
+                    buf = []
+                    if vazute % 5000 == 0:
+                        log.info("Citite %d firme din sursă (%d noi)...", vazute, noi)
+        finally:
+            # Salvăm ce avem chiar dacă rularea e întreruptă (ex. anulare, timeout).
+            noi += self.db.insert_many(buf)
 
         self.db.log_run(
             etapa="collect", sursa=source_name, inceput=started,

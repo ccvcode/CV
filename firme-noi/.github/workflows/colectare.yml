@@ -25,6 +25,10 @@ on:
         description: "Sursa listei: anaf_scan (merge de pe GitHub) sau onrc (data.gov.ro, doar din România)"
         required: false
         default: "anaf_scan"
+      max_batches:
+        description: "anaf_scan: loturi de 100 CUI pe tranșă (restul continuă automat în rularea următoare)"
+        required: false
+        default: "1200"
   schedule:
     - cron: "23 4 * * *"   # zilnic, ~07:23 ora României
   push:
@@ -32,6 +36,7 @@ on:
 
 permissions:
   contents: write
+  actions: write   # pentru pornirea automată a tranșei următoare
 
 concurrency:
   group: colectare-firme
@@ -72,6 +77,9 @@ jobs:
           SURSA="${{ inputs.sursa }}"
           [ -z "$SURSA" ] && SURSA="anaf_scan"
           echo "SURSA=$SURSA" >> "$GITHUB_ENV"
+          MAX_BATCHES="${{ inputs.max_batches }}"
+          [ -z "$MAX_BATCHES" ] && MAX_BATCHES="1200"
+          echo "MAX_BATCHES=$MAX_BATCHES" >> "$GITHUB_ENV"
           echo "LIMIT=${{ inputs.limit }}" >> "$GITHUB_ENV"
           echo "AN=${DUPA:0:4}" >> "$GITHUB_ENV"
 
@@ -82,11 +90,17 @@ jobs:
           key: firme-db-${{ github.run_id }}
           restore-keys: firme-db-
 
-      - name: Verificare acces ANAF + ONRC
-        run: python run.py probe
+      - name: Verificare acces ANAF
+        run: |
+          if [ "$SURSA" = "anaf_scan" ]; then python run.py probe --doar-anaf; else python run.py probe; fi
 
       - name: Colectare firme noi
-        run: python run.py collect --source "$SURSA" --dupa "$DUPA"
+        run: |
+          if [ "$SURSA" = "anaf_scan" ]; then
+            python run.py collect --source anaf_scan --dupa "$DUPA" --max-batches "$MAX_BATCHES"
+          else
+            python run.py collect --source "$SURSA" --dupa "$DUPA"
+          fi
 
       - name: Îmbogățire ANAF (telefon, adresă, CAEN, TVA)
         run: |
@@ -132,3 +146,15 @@ jobs:
           git add -A
           git commit -qm "Rezultate $(date -u +%F) – rulare ${GITHUB_RUN_ID}"
           git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" rezultate
+
+      - name: Continuă automat (dacă scanarea nu s-a terminat)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(cat data/scan_status.txt 2>/dev/null)" = "partial" ]; then
+            echo "Scanare parțială: pornesc tranșa următoare."
+            gh workflow run colectare.yml --ref "${GITHUB_REF_NAME}" \
+              -f dupa="$DUPA" -f sursa="$SURSA" -f max_batches="$MAX_BATCHES"
+          else
+            echo "Scanare completă."
+          fi

@@ -42,10 +42,19 @@ class AnafClient:
 
     def query_raw(self, cuis: Iterable[int]) -> dict:
         """O singură cerere ANAF; întoarce corpul JSON brut."""
-        payload = [{"cui": int(cui), "data": today_str()} for cui in cuis]
+        cuis = [int(cui) for cui in cuis]
+        payload = [{"cui": cui, "data": today_str()} for cui in cuis]
         resp = self.session.post(
             self.endpoint, json=payload, headers={"Content-Type": "application/json"},
         )
+        if resp.status_code == 404:
+            # ANAF răspunde 404 când NICIUN CUI din listă nu există (ex. CUI-uri
+            # încă nealocate). E un răspuns valid, nu o eroare de rețea.
+            try:
+                body = resp.json()
+            except ValueError:
+                body = {}
+            return {"found": [], "notFound": (body or {}).get("notFound") or cuis}
         resp.raise_for_status()
         body = resp.json()
         if "found" not in body and "notFound" not in body:

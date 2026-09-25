@@ -58,9 +58,22 @@ class AnafScanSource(Source):
         self.seed = int(options.get("seed") or os.environ.get("ANAF_SCAN_SEED") or self.DEFAULT_SEED)
         self.known_min: Optional[int] = options.get("known_min")
         self.known_max: Optional[int] = options.get("known_max")
-        self.stop_after = int(options.get("stop_after") or 5)
-        self.max_batches = int(options.get("max_batches")
-                               or os.environ.get("ANAF_SCAN_MAX_BATCHES") or 5000)
+        # Câte loturi consecutive „goale"/vechi opresc scanarea (10 × 100 CUI).
+        self.stop_after = int(options.get("stop_after") or 10)
+        # Câte loturi eșuate la rând (după reîncercări) opresc rularea cu eroare.
+        self.max_consecutive_failures = int(options.get("max_consecutive_failures") or 3)
+        self._failures_in_row = 0
+        # Buget total de loturi pe rulare (↑ + ↓). None = până la capăt.
+        budget = options.get("max_batches") or os.environ.get("ANAF_SCAN_MAX_BATCHES")
+        self.max_batches: Optional[int] = int(budget) if budget else None
+        # Un lot „e din perioadă" doar dacă măcar această fracție din firmele
+        # găsite sunt înregistrate după `dupa`. Firmele vechi izolate cu dată
+        # recentă (ex. mutări de sediu) nu mai țin scanarea pornită prin anii trecuți.
+        self.min_recent_share = float(options.get("min_recent_share") or 0.3)
+        self.batches_done = 0
+        self.up_done = False
+        self.down_done = False
+        self.complete = False
         self.retry_waits = options.get("retry_waits", (10, 30, 60))
         self.batch = config.anaf_batch_size
         self.client = options.get("client") or AnafClient(
@@ -81,13 +94,20 @@ class AnafScanSource(Source):
         for wait in waits:
             for _, found, _, ok in self.client.lookup_batches(cuis):
                 if ok:
+                    self._failures_in_row = 0
                     return found
             if wait is None:
                 break
             log.warning("Lot ANAF eșuat (%s–%s); reîncerc în %ss.", cuis[0], cuis[-1], wait)
             time.sleep(wait)
         self.missed.append((cuis[0], cuis[-1]))
+        self._failures_in_row += 1
         log.error("Lot ANAF pierdut după reîncercări: %s–%s", cuis[0], cuis[-1])
+        if self._failures_in_row >= self.max_consecutive_failures:
+            raise RuntimeError(
+                f"ANAF nu a răspuns la {self._failures_in_row} loturi consecutive; opresc "
+                "rularea (datele colectate până acum sunt salvate și rularea următoare continuă)."
+            )
         return None
 
     def _recent(self, found: dict[int, Company]) -> list[Company]:
@@ -109,46 +129,68 @@ class AnafScanSource(Source):
             log.info("Scanare %s: %d loturi, CUI curent %d | firme găsite %d, cu telefon %d",
                      direction, batches, cui, self.found_total, self.with_phone)
 
+    def _budget_left(self) -> bool:
+        return self.max_batches is None or self.batches_done < self.max_batches
+
+    def _is_recent_batch(self, found: dict[int, Company], recent: list[Company]) -> bool:
+        return bool(recent) and len(recent) >= self.min_recent_share * len(found)
+
     def scan_up(self, start_base: int) -> Iterator[Company]:
         """În sus, până la `stop_after` loturi consecutive fără nicio firmă."""
-        empty = batches = 0
+        empty = 0
         base = start_base
-        while empty < self.stop_after and batches < self.max_batches:
+        while self._budget_left():
+            if empty >= self.stop_after:
+                self.up_done = True
+                break
             found = self._query(range(base, base + self.batch))
-            batches += 1
-            self._progress("↑", batches, cui_from_base(base))
+            self.batches_done += 1
+            self._progress("↑", self.batches_done, cui_from_base(base))
             base += self.batch
             if found is None:
                 continue
             empty = 0 if found else empty + 1
             yield from self._emit(self._recent(found))
-        log.info("Scanare ↑ terminată la CUI ~%d (%d loturi).", cui_from_base(base), batches)
+        else:
+            self.up_done = empty >= self.stop_after
+        log.info("Scanare ↑ %s la CUI ~%d.", "terminată" if self.up_done else "întreruptă (buget)",
+                 cui_from_base(base))
 
     def scan_down(self, start_base: int) -> Iterator[Company]:
-        """În jos, până la `stop_after` loturi consecutive fără firme din perioadă."""
-        old = batches = 0
+        """În jos, până la `stop_after` loturi consecutive din afara perioadei."""
+        old = 0
         top = start_base
-        while old < self.stop_after and batches < self.max_batches and top > 0:
+        while self._budget_left() and top > 0:
+            if old >= self.stop_after:
+                self.down_done = True
+                break
             low = max(top - self.batch + 1, 1)
             found = self._query(range(low, top + 1))
-            batches += 1
-            self._progress("↓", batches, cui_from_base(low))
+            self.batches_done += 1
+            self._progress("↓", self.batches_done, cui_from_base(low))
             top = low - 1
             if found is None:
                 continue
             recent = self._recent(found)
-            old = 0 if recent else old + 1
+            old = 0 if self._is_recent_batch(found, recent) else old + 1
             yield from self._emit(recent)
-        log.info("Scanare ↓ terminată la CUI ~%d (%d loturi).", cui_from_base(max(top, 1)), batches)
+        else:
+            self.down_done = old >= self.stop_after or top <= 0
+        log.info("Scanare ↓ %s la CUI ~%d.", "terminată" if self.down_done else "întreruptă (buget)",
+                 cui_from_base(max(top, 1)))
 
     def collect(self) -> Iterator[Company]:
         seed_base = self.seed // 10
         up_start = max(seed_base, (self.known_max or 0) // 10) + 1
         down_start = (self.known_min // 10 - 1) if self.known_min else seed_base
-        log.info("Scanare ANAF: firme înregistrate după %s; pornire de la CUI %d "
-                 "(↑ de la %d, ↓ de la %d).", self.dupa, self.seed,
-                 cui_from_base(up_start), cui_from_base(max(down_start, 1)))
+        log.info("Scanare ANAF: firme înregistrate după %s; ↑ de la CUI %d, ↓ de la CUI %d; "
+                 "buget %s loturi.", self.dupa, cui_from_base(up_start),
+                 cui_from_base(max(down_start, 1)), self.max_batches or "nelimitat")
         yield from self.scan_up(up_start)
-        yield from self.scan_down(down_start)
-        log.info("Scanare ANAF: %d firme găsite, %d cu telefon, %d loturi pierdute.",
-                 self.found_total, self.with_phone, len(self.missed))
+        if self.up_done:
+            yield from self.scan_down(down_start)
+        self.complete = self.up_done and self.down_done
+        log.info("Scanare ANAF: %d firme găsite în această rulare, %d cu telefon, "
+                 "%d loturi, %d pierdute. Stare: %s.", self.found_total, self.with_phone,
+                 self.batches_done, len(self.missed),
+                 "COMPLETĂ" if self.complete else "PARȚIALĂ (continuă la rularea următoare)")
