@@ -1,0 +1,7 @@
+# Dependențe pentru sistemul de colectare firme noi.
+# Instalare:  pip install -r requirements.txt
+
+requests>=2.28        # apeluri HTTP către ANAF / data.gov.ro / Google
+
+# Opțional – doar dacă vrei export în Excel (.xlsx). CSV-ul funcționează fără el.
+openpyxl>=3.1

@@ -1,0 +1,150 @@
+# Firme Noi — colectare automată + îmbogățire ANAF
+
+Sistem automat care:
+
+1. **Colectează** firmele nou înființate din România (sursă principală: datele
+   deschise ONRC de pe [data.gov.ro](https://data.gov.ro); secundar, best-effort:
+   Monitorul Oficial Partea a IV-a).
+2. **Îmbogățește** fiecare firmă cu datele oficiale de la **ANAF** (denumire,
+   nr. reg. com., adresă, cod CAEN, stare TVA, data înmatriculării).
+3. **Caută** numere de telefon (best-effort — vezi avertismentul de mai jos).
+4. **Stochează** totul într-o **bază de date SQLite**, cu deduplicare automată.
+
+---
+
+## De reținut: de unde vin numerele de telefon
+
+| Sursă | Ce oferă | Telefon? |
+|-------|----------|----------|
+| ONRC (data.gov.ro) | denumire, CUI, nr. reg. com., adresă, stare | ❌ nu |
+| **ANAF API public** | denumire, adresă, CAEN, stare TVA, + câmpul `telefon` din `date_generale` | ✅ **da, când firma l-a declarat** (acoperire variabilă) |
+| Google Places API | telefon, website (dacă firma e listată) | ✅ parțial, **necesită cheie plătită** |
+| Căutare web | orice apare public pe site-uri | ⚠️ fragil, orientativ |
+
+**Ce e important de știut, corect:** API-ul public ANAF (`PlatitorTvaRest`)
+returnează în `date_generale` un câmp `telefon` (și adresa completă), gratuit,
+după CUI. Acoperirea depinde de ce a declarat fiecare firmă la ANAF — nu toate
+au telefon, dar multe au. Acesta este providerul principal de telefon din
+sistem (`PHONE_PROVIDERS=anaf`). Pentru firmele fără telefon în ANAF, se pot
+adăuga surse suplimentare (Google Places, căutare web).
+
+Sistemul **nu inventează niciodată** un număr — dacă nicio sursă nu întoarce
+unul, câmpul rămâne gol. Comanda `verify` reinteroghează ANAF și îți arată
+exact ce se confirmă, ca să poți valida orice listă.
+
+---
+
+## Instalare
+
+```bash
+cd firme-noi
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env        # apoi editează .env după nevoie
+```
+
+Necesită Python 3.10+.
+
+---
+
+## Utilizare rapidă
+
+```bash
+# 1. Colectează firmele noi din ONRC (data.gov.ro)
+python run.py collect --source onrc
+
+# 2. Completează cu date oficiale de la ANAF
+python run.py enrich
+
+# 3. Caută telefoane (best-effort, după providerii din .env)
+python run.py phones
+
+# — sau tot fluxul dintr-o comandă —
+python run.py run --source onrc
+
+# Statistici
+python run.py stats
+
+# Export pentru lucru (CSV sau XLSX)
+python run.py export --out export/firme.csv --only-with-phone
+python run.py export --out export/iasi.xlsx --format xlsx --judet Iași
+```
+
+### Import dintr-un fișier existent
+
+Dacă ai deja o listă (Excel/CSV primit sau exportat de undeva):
+
+```bash
+python run.py import --file lista.xlsx
+```
+
+Datele importate sunt marcate ca **neverificate**. Ca să afli ce e real:
+
+```bash
+python run.py verify --limit 100
+```
+
+`verify` interoghează API-ul oficial ANAF pentru fiecare firmă și raportează
+dacă denumirea se confirmă și dacă ANAF chiar returnează un telefon. Așa
+demaști rapid datele inventate (nume care nu se potrivesc, CUI-uri inexistente,
+telefoane care nu vin din nicio sursă oficială).
+
+---
+
+## Cum sunt detectate „firmele noi"
+
+ONRC nu publică un flux „doar firmele de azi", ci un fișier cu **toate** firmele
+(`OD_FIRME.csv`), actualizat periodic. Sistemul folosește baza de date ca
+memorie: **orice CUI care apare în fișier și nu există încă la noi este o firmă
+nouă**. La prima rulare se creează baza de referință; de la a doua rulare
+încolo obții doar noutățile. Rulările repetate nu creează duplicate.
+
+Pentru confirmarea că o firmă e într-adevăr recentă, folosește
+`data_inregistrare` adusă de ANAF (data reală a înmatriculării).
+
+---
+
+## Automatizare (rulare zilnică)
+
+```bash
+chmod +x scripts/run_daily.sh
+crontab -e     # adaugă linia din scripts/crontab.example
+```
+
+---
+
+## Arhitectură
+
+```
+firme-noi/
+├── run.py                    # CLI (collect / enrich / phones / run / import / verify / stats / export)
+├── firme/
+│   ├── config.py             # configurare din .env
+│   ├── models.py             # modelul Company
+│   ├── db.py                 # SQLite: schemă, inserare cu deduplicare, statistici
+│   ├── util.py               # HTTP cu throttling+retry, normalizare telefoane
+│   ├── importers.py          # import din .xlsx / .csv
+│   ├── pipeline.py           # orchestrarea fluxului
+│   ├── sources/              # de UNDE luăm firmele
+│   │   ├── onrc_opendata.py  #   ONRC / data.gov.ro (recomandat)
+│   │   └── monitorul_oficial.py  # Monitorul Oficial Partea IV (best-effort, PDF)
+│   └── enrich/               # cu CE le completăm
+│       ├── anaf.py           #   API oficial ANAF (adresă, CAEN, TVA…)
+│       └── phone.py          #   telefoane: anaf / google / web
+├── scripts/                  # rulare zilnică + exemplu cron
+└── tests/                    # teste (fără rețea)
+```
+
+Baza de date e SQLite (un singur fișier, `data/firme.db`) — zero configurare.
+Migrarea la PostgreSQL e simplă, schema fiind aproape identică.
+
+---
+
+## Notă legală / GDPR
+
+Datele despre firme (denumire, CUI, sediu) sunt publice. Numerele de telefon,
+mai ales cele legate de persoane fizice autorizate, pot intra sub incidența
+GDPR. Folosește datele **doar** în scop legitim și declarat (ex. B2B), respectă
+cererile de dezabonare și legislația privind comunicările comerciale
+(ex. consimțământ pentru marketing). Sursele oficiale au propriile condiții de
+licențiere (ONRC: Licența pentru Guvernare Deschisă; ANAF: serviciu public).
