@@ -28,6 +28,7 @@ from firme.enrich import AnafClient
 from firme.importers import iter_companies_from_file
 from firme.pipeline import Pipeline
 from firme.util import ThrottledSession
+from firme.webpage import render_artifact, render_standalone
 
 # Coloanele exportate, în ordine.
 EXPORT_COLUMNS = [
@@ -210,19 +211,22 @@ def cmd_export(args, cfg, db):
     print(f"Export scris: {out} ({len(companies)} firme)")
 
 
+def cmd_page(args, cfg, db):
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    companies = db.query(**filters_from_args(args))
+    html = render_artifact(companies) if args.artifact else render_standalone(companies)
+    out.write_text(html, encoding="utf-8")
+    print(f"Pagină generată: {out} ({len(companies)} firme). "
+          f"Deschide-o în browser (dublu-click).")
+
+
 def _export_xlsx(out: Path, companies):
     try:
-        import openpyxl  # type: ignore
+        from firme.excel import build_workbook
     except ImportError:
         sys.exit("Pentru export .xlsx: pip install openpyxl (sau folosește .csv)")
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Firme"
-    ws.append(EXPORT_COLUMNS)
-    for c in companies:
-        row = c.to_row()
-        ws.append([row.get(col) for col in EXPORT_COLUMNS])
-    wb.save(out)
+    build_workbook(companies, out)
 
 
 def _norm(text) -> str:
@@ -279,6 +283,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--format", choices=["csv", "xlsx"], default="csv")
     add_filter_args(sp)
     sp.set_defaults(func=cmd_export)
+
+    sp = sub.add_parser("page", help="generează o pagină web (dashboard) din baza de date")
+    sp.add_argument("--out", default="export/index.html")
+    sp.add_argument("--artifact", action="store_true",
+                    help="variantă pentru publicare (fără doctype/head/body)")
+    add_filter_args(sp)
+    sp.set_defaults(func=cmd_page)
 
     return p
 
