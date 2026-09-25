@@ -119,10 +119,12 @@ jobs:
       - name: Export Excel + CSV
         run: |
           mkdir -p out
-          python run.py export --format xlsx --dupa "$DUPA" --out "out/Firme-noi-$AN.xlsx"
-          python run.py export --format xlsx --dupa "$DUPA" --with-phone --fara-suspecte \
+          # Firme noi active (fără sedii secundare, PFA, profesii liberale, radiate)
+          python run.py export --format xlsx --doar-firme --dupa "$DUPA" --out "out/Firme-noi-$AN.xlsx"
+          python run.py export --format xlsx --doar-firme --dupa "$DUPA" --with-phone --fara-suspecte \
             --out "out/Firme-noi-$AN-cu-telefon.xlsx"
-          python run.py export --dupa "$DUPA" --out "out/Firme-noi-$AN.csv"
+          # Toate înregistrările (inclusiv sedii secundare, PFA), cu coloana „tip_entitate"
+          python run.py export --dupa "$DUPA" --out "out/Toate-inregistrarile-$AN.csv"
           python run.py stats > out/STATISTICI.txt
 
       - name: Rezultate (artifact)
@@ -138,7 +140,7 @@ jobs:
         run: |
           d="$(mktemp -d)"
           cp "out/Firme-noi-$AN.xlsx" "out/Firme-noi-$AN-cu-telefon.xlsx" out/STATISTICI.txt "$d/"
-          gzip -c "out/Firme-noi-$AN.csv" > "$d/Firme-noi-$AN.csv.gz"
+          gzip -c "out/Toate-inregistrarile-$AN.csv" > "$d/Toate-inregistrarile-$AN.csv.gz"
           cd "$d"
           git init -q -b rezultate
           git config user.name "github-actions[bot]"

@@ -14,12 +14,15 @@ from collections import Counter
 from pathlib import Path
 from typing import Iterable
 
+from .classify import este_activa, tip_entitate
 from .models import Company
 
 # (câmp, antet afișat, lățime coloană, tip)  — tip: text/bool/int/money/mono
 _COLS = [
     ("cui", "CUI", 12, "mono"),
     ("denumire", "Denumire", 34, "text"),
+    ("tip_entitate", "Tip entitate", 20, "text"),
+    ("activa", "Activă", 8, "bool"),
     ("telefon", "Telefon", 15, "mono"),
     ("telefon_suspect", "Tel. suspect", 11, "bool"),
     ("telefon_sursa", "Sursă tel.", 10, "text"),
@@ -91,6 +94,8 @@ def build_workbook(companies: Iterable[Company], path: Path | str) -> int:
 
     for c in companies:
         row = c.to_row()
+        row["tip_entitate"] = tip_entitate(c)
+        row["activa"] = este_activa(c)
         cells = []
         for field, _, _, kind in _COLS:
             value = row.get(field)
@@ -132,6 +137,11 @@ def build_workbook(companies: Iterable[Company], path: Path | str) -> int:
     line("  din care de verificat (suspecte)", suspecte)
     line("Plătitori TVA", sum(1 for c in companies if c.platitor_tva), bold)
     line("Județe distincte", len({c.judet for c in companies if c.judet}), bold)
+    s.append([])
+
+    line("Pe tip de entitate", "înregistrări", bold)
+    for name, n in Counter(tip_entitate(c) for c in companies).most_common():
+        line(name, n)
     s.append([])
 
     line("Pe domenii (secțiune CAEN)", "firme", bold)

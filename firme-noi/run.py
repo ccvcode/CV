@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+from collections import Counter
 import logging
 import sys
 from pathlib import Path
 
+from firme.classify import este_activa, este_firma_noua_activa, tip_entitate
 from firme.config import load_config
 from firme.db import Database
 from firme.enrich import AnafClient
@@ -32,7 +34,7 @@ from firme.webpage import render_artifact, render_standalone
 
 # Coloanele exportate, în ordine.
 EXPORT_COLUMNS = [
-    "cui", "denumire", "nr_reg_com", "forma_juridica",
+    "cui", "denumire", "tip_entitate", "activa", "nr_reg_com", "forma_juridica",
     "cod_caen", "caen_descriere", "caen_sectiune", "caen_sectiune_nume",
     "telefon", "telefon_sursa", "telefon_suspect", "email", "website",
     "judet", "localitate", "strada", "numar", "cod_postal", "adresa",
@@ -71,6 +73,8 @@ def add_filter_args(sp: argparse.ArgumentParser) -> None:
                     help="exclude telefoanele de formă (ex. 0770000000)")
     sp.add_argument("--doar-verificate", action="store_true",
                     help="doar firmele confirmate de ANAF")
+    sp.add_argument("--doar-firme", action="store_true",
+                    help="doar firme noi active (fără sedii secundare, PFA, profesii liberale, radiate)")
     sp.add_argument("--min-salariati", type=int)
     sp.add_argument("--min-cifra", type=float, help="cifră de afaceri minimă")
     sp.add_argument("--dupa", help="înregistrate după data (YYYY-MM-DD)")
@@ -103,6 +107,23 @@ def filters_from_args(args) -> dict:
         desc=args.desc,
         limit=args.limit,
     )
+
+
+def select_companies(args, db):
+    """Aplică filtrele SQL, apoi (opțional) clasificarea pe tip de entitate."""
+    filters = filters_from_args(args)
+    if not getattr(args, "doar_firme", False):
+        return db.query(**filters)
+    limit = filters.pop("limit", None)
+    companies = [c for c in db.query(**filters) if este_firma_noua_activa(c)]
+    return companies[:limit] if limit else companies
+
+
+def export_row(c) -> dict:
+    row = c.to_row()
+    row["tip_entitate"] = tip_entitate(c)
+    row["activa"] = int(este_activa(c))
+    return row
 
 
 # --------------------------------------------------------------------------- #
@@ -255,6 +276,17 @@ def cmd_stats(args, cfg, db):
     print(f"  Cu bilanț:            {s['cu_bilant']}")
     if s["total"]:
         print(f"  Acoperire telefon:    {100 * s['cu_telefon'] / s['total']:.1f}%")
+    tipuri = Counter()
+    firme_tel = 0
+    for c in db.iter_all():
+        tipuri[tip_entitate(c)] += 1
+        if este_firma_noua_activa(c) and c.telefon and not c.telefon_suspect:
+            firme_tel += 1
+    if tipuri:
+        print("\n  Pe tip de entitate:")
+        for name, n in tipuri.most_common():
+            print(f"    {name}: {n}")
+        print(f"  Firme noi active cu telefon valid: {firme_tel}")
     if s["pe_sectiune"]:
         print("\n  Pe secțiuni CAEN:")
         for sec, n in list(s["pe_sectiune"].items())[:12]:
@@ -266,7 +298,7 @@ def cmd_stats(args, cfg, db):
 
 
 def cmd_filter(args, cfg, db):
-    companies = db.query(**filters_from_args(args))
+    companies = select_companies(args, db)
     print(f"{len(companies)} firme găsite:\n")
     for c in companies:
         tel = c.telefon or "-"
@@ -278,7 +310,7 @@ def cmd_filter(args, cfg, db):
 def cmd_export(args, cfg, db):
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    companies = db.query(**filters_from_args(args))
+    companies = select_companies(args, db)
     if args.format == "xlsx" or out.suffix.lower() == ".xlsx":
         _export_xlsx(out, companies)
     else:
@@ -286,7 +318,7 @@ def cmd_export(args, cfg, db):
             writer = csv.writer(fh)
             writer.writerow(EXPORT_COLUMNS)
             for c in companies:
-                row = c.to_row()
+                row = export_row(c)
                 writer.writerow([row.get(col) for col in EXPORT_COLUMNS])
     print(f"Export scris: {out} ({len(companies)} firme)")
 
@@ -294,7 +326,7 @@ def cmd_export(args, cfg, db):
 def cmd_page(args, cfg, db):
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    companies = db.query(**filters_from_args(args))
+    companies = select_companies(args, db)
     html = render_artifact(companies) if args.artifact else render_standalone(companies)
     out.write_text(html, encoding="utf-8")
     print(f"Pagină generată: {out} ({len(companies)} firme). "

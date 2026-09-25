@@ -179,12 +179,25 @@ Pentru fiecare firmă se rețin (când sursa le oferă):
 Există și un tabel de referință `caen_ref` (cod → descriere + secțiune) și un
 tabel `runs` cu jurnalul fiecărei rulări.
 
+## Tipuri de entitate
+
+ANAF alocă CUI și sediilor secundare ale firmelor existente, persoanelor fizice
+autorizate (PFA/II/IF), profesiilor liberale și asociațiilor. Fiecare
+înregistrare primește în export coloana **„Tip entitate"** (Firmă · Sediu
+secundar · PFA / II / IF · Profesie liberală / cabinet · Asociație / ONG /
+altele) și **„Activă"** (Nu pentru radiate/dizolvate/inactive).
+
+Exemplu 2026 (1 ian – 25 sept): 243.152 de înregistrări noi, dintre care
+~99.000 firme noi (93.030 active), iar 50.418 au telefon valid la ANAF.
+Fișierele principale (`Firme-noi-AN*.xlsx`) conțin doar firmele noi active;
+`Toate-inregistrarile-AN.csv.gz` le conține pe toate.
+
 ## Filtre disponibile (comenzile `filter` și `export`)
 
 `--judet` · `--localitate` · `--caen` (cod exact) · `--caen-prefix` (ex. `62` =
 tot IT-ul) · `--sectiune` (A–U, ex. `F` = construcții) · `--denumire` ·
 `--with-phone` / `--without-phone` · `--with-email` · `--platitor-tva` ·
-`--active` (exclude radiate/inactive) · `--min-salariati N` · `--min-cifra X` ·
+`--active` (exclude radiate/inactive) · `--doar-firme` (doar firme noi active) · `--fara-suspecte` · `--min-salariati N` · `--min-cifra X` ·
 `--dupa YYYY-MM-DD` / `--inainte YYYY-MM-DD` · `--order-by` · `--desc` · `--limit`
 
 Secțiunile CAEN utile: **F** construcții, **G** comerț, **J** IT & comunicații,

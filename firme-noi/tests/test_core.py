@@ -301,6 +301,37 @@ class TestOnrcParsing(unittest.TestCase):
             list(self._source(dupa="2026-01-01").parse_lines(sample))
 
 
+class TestClassify(unittest.TestCase):
+    """Exemple reale din colectarea 2026."""
+
+    def t(self, denumire, forma="", stare="INREGISTRAT din data 01.03.2026"):
+        from firme.classify import este_activa, tip_entitate
+        c = Company(cui=1, denumire=denumire, forma_juridica=forma, stare_inregistrare=stare)
+        return tip_entitate(c), este_activa(c)
+
+    def test_types(self):
+        from firme import classify as k
+        SRL = "SOCIETATE COMERCIALĂ CU RĂSPUNDERE LIMITATĂ"
+        SA = "SOCIETATE COMERCIALĂ PE ACŢIUNI"
+        self.assertEqual(self.t("PĂULEȚI PROIECT CONSTRUCT SRL", SRL)[0], k.FIRMA)
+        self.assertEqual(self.t("VUNARO S.R.L.")[0], k.FIRMA)          # formă necompletată
+        self.assertEqual(self.t("BRD - GROUPE SOCIETE GENERALE SA - SEDIU SECUNDAR", SA)[0],
+                         k.SEDIU_SECUNDAR)
+        self.assertEqual(self.t("CONEX DISTRIBUTION SA - SEDIU SECUNDAR DESEMNAT", SA)[0],
+                         k.SEDIU_SECUNDAR)
+        self.assertEqual(self.t("POPESCU ION PERSOANĂ FIZICĂ AUTORIZATĂ")[0], k.PFA)
+        self.assertEqual(self.t("IONESCU MARIA PFA")[0], k.PFA)
+        self.assertEqual(self.t("DUMITRU ANA ÎNTREPRINDERE INDIVIDUALĂ")[0], k.PFA)
+        self.assertEqual(self.t("ASOCIATIA BUCOVINA CONNECT", "ALTE FORME JURIDICE")[0], k.ASOCIATIE)
+        self.assertEqual(self.t("AVOCAT STAGIAR DAN SIMONA MIRELA")[0], k.PROFESIE)
+        self.assertEqual(self.t("TINCU F. IOANA-FLORENTINA - AGENT DE ASIGURARE")[0], k.PROFESIE)
+
+    def test_radiata_nu_e_activa(self):
+        tip, activa = self.t("X SRL", "SOCIETATE COMERCIALĂ CU RĂSPUNDERE LIMITATĂ",
+                             stare="RADIERE din data 10.02.2026")
+        self.assertFalse(activa)
+
+
 class TestAnafScan(unittest.TestCase):
     def test_control_digit_matches_real_cuis(self):
         from firme.sources.anaf_scan import cui_from_base, is_valid_cui
