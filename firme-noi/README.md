@@ -48,9 +48,11 @@ cerere); rulările următoare interoghează doar firmele nou apărute.
 1. Creează un repository **privat** (ex. `firme-noi`) și copiază în el conținutul
    acestui folder (`firme-noi/` devine rădăcina repository-ului).
 2. În tab-ul **Actions** pornește „Colectare firme noi" (*Run workflow*).
-3. Descarcă Excel-ul din secțiunea **Artifacts** a rulării. De atunci rulează
-   singur în fiecare dimineață. Workflow-ul refuză să ruleze într-un repository
-   public, ca datele de contact să nu devină publice.
+3. Excel-ul apare în branch-ul **`rezultate`** al repository-ului (ultima rulare)
+   și în secțiunea **Artifacts** a rulării. De atunci rulează singur în fiecare
+   dimineață; o rulare suplimentară pornește și la modificarea fișierului
+   `rulare.txt`. Workflow-ul refuză să ruleze într-un repository public, ca
+   datele de contact să nu devină publice.
 
 **B. Pe calculatorul tău (Windows)** — instalează Python, apoi dublu-click pe
 `scripts\colecteaza.bat`. Excel-urile apar în folderul `export`.
