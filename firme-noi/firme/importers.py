@@ -17,6 +17,7 @@ import unicodedata
 from pathlib import Path
 from typing import Iterator, Optional
 
+from . import caen as caen_ref
 from .models import Company
 
 log = logging.getLogger("firme")
@@ -128,11 +129,16 @@ def iter_companies_from_file(path: Path | str, sursa: str = "import") -> Iterato
             k: (str(v).strip() if isinstance(v, str) else v) for k, v in record.items()
         }
         telefon = clean.get("telefon")
+        cod_caen = str(clean.get("cod_caen")).strip() if clean.get("cod_caen") is not None else None
+        caen_info = caen_ref.enrich_caen(cod_caen)
         yield Company(
             cui=cui,
             denumire=clean.get("denumire"),
             nr_reg_com=clean.get("nr_reg_com"),
-            cod_caen=str(clean.get("cod_caen")).strip() if clean.get("cod_caen") is not None else None,
+            cod_caen=cod_caen,
+            caen_descriere=caen_info["caen_descriere"],
+            caen_sectiune=caen_info["caen_sectiune"],
+            caen_sectiune_nume=caen_info["caen_sectiune_nume"],
             judet=clean.get("judet"),
             localitate=clean.get("localitate"),
             adresa=clean.get("adresa"),

@@ -2,14 +2,16 @@
 """Interfața de linie de comandă pentru sistemul de colectare firme noi.
 
 Exemple:
-    python run.py collect --source onrc        # colectează firme noi din ONRC
-    python run.py enrich                        # completează cu date ANAF
-    python run.py phones                        # caută telefoane (best-effort)
-    python run.py run --source onrc             # tot fluxul, o singură comandă
-    python run.py import --file lista.xlsx      # importă un fișier existent
-    python run.py verify --limit 50             # confruntă datele cu ANAF (real)
-    python run.py stats                         # statistici
-    python run.py export --out export/firme.csv # exportă în CSV
+    python run.py collect --source onrc          # colectează firme noi din ONRC
+    python run.py enrich                          # date generale de la ANAF
+    python run.py phones                          # caută telefoane (best-effort)
+    python run.py bilant --an 2024                # indicatori financiari
+    python run.py run --source onrc               # collect + enrich + phones
+    python run.py import --file lista.xlsx        # importă un fișier existent
+    python run.py verify --limit 50               # confruntă datele cu ANAF real
+    python run.py stats                           # statistici detaliate
+    python run.py filter --sectiune F --with-phone --judet Cluj   # filtrare
+    python run.py export --out firme.xlsx --sectiune J --min-salariati 5
 """
 
 from __future__ import annotations
@@ -27,6 +29,18 @@ from firme.importers import iter_companies_from_file
 from firme.pipeline import Pipeline
 from firme.util import ThrottledSession
 
+# Coloanele exportate, în ordine.
+EXPORT_COLUMNS = [
+    "cui", "denumire", "nr_reg_com", "forma_juridica",
+    "cod_caen", "caen_descriere", "caen_sectiune", "caen_sectiune_nume",
+    "telefon", "telefon_sursa", "email", "website",
+    "judet", "localitate", "strada", "numar", "cod_postal", "adresa",
+    "stare_inregistrare", "data_inregistrare", "inactiv",
+    "platitor_tva", "tva_la_incasare", "split_tva", "ro_e_factura",
+    "an_bilant", "cifra_afaceri", "profit_net", "numar_salariati",
+    "sursa", "data_colectare", "anaf_verificat",
+]
+
 
 def setup_logging(verbose: bool) -> None:
     logging.basicConfig(
@@ -37,49 +51,91 @@ def setup_logging(verbose: bool) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Filtre partajate                                                              #
+# --------------------------------------------------------------------------- #
+
+def add_filter_args(sp: argparse.ArgumentParser) -> None:
+    sp.add_argument("--judet")
+    sp.add_argument("--localitate")
+    sp.add_argument("--caen", help="cod CAEN exact (ex. 6201)")
+    sp.add_argument("--caen-prefix", help="prefix CAEN (ex. 62 pentru tot IT-ul)")
+    sp.add_argument("--sectiune", help="secțiune CAEN A–U (ex. F = construcții)")
+    sp.add_argument("--denumire", help="parte din denumire")
+    sp.add_argument("--with-phone", action="store_true", help="doar cu telefon")
+    sp.add_argument("--without-phone", action="store_true", help="doar fără telefon")
+    sp.add_argument("--with-email", action="store_true")
+    sp.add_argument("--platitor-tva", action="store_true")
+    sp.add_argument("--active", action="store_true", help="exclude radiate/inactive")
+    sp.add_argument("--min-salariati", type=int)
+    sp.add_argument("--min-cifra", type=float, help="cifră de afaceri minimă")
+    sp.add_argument("--dupa", help="înregistrate după data (YYYY-MM-DD)")
+    sp.add_argument("--inainte", help="înregistrate înainte de (YYYY-MM-DD)")
+    sp.add_argument("--order-by", default="data_colectare")
+    sp.add_argument("--desc", action="store_true")
+    sp.add_argument("--limit", type=int)
+
+
+def filters_from_args(args) -> dict:
+    with_phone = True if args.with_phone else (False if args.without_phone else None)
+    return dict(
+        judet=args.judet,
+        localitate=args.localitate,
+        caen=args.caen,
+        caen_prefix=args.caen_prefix,
+        sectiune=args.sectiune,
+        denumire_like=args.denumire,
+        with_phone=with_phone,
+        with_email=True if args.with_email else None,
+        platitor_tva=True if args.platitor_tva else None,
+        doar_active=args.active,
+        min_salariati=args.min_salariati,
+        min_cifra_afaceri=args.min_cifra,
+        inregistrata_dupa=args.dupa,
+        inregistrata_inainte=args.inainte,
+        order_by=args.order_by,
+        desc=args.desc,
+        limit=args.limit,
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Comenzi                                                                       #
 # --------------------------------------------------------------------------- #
 
-def cmd_collect(args, cfg, db) -> None:
+def cmd_collect(args, cfg, db):
     Pipeline(cfg, db).collect(args.source)
 
 
-def cmd_enrich(args, cfg, db) -> None:
+def cmd_enrich(args, cfg, db):
     Pipeline(cfg, db).enrich_anaf(limit=args.limit)
 
 
-def cmd_phones(args, cfg, db) -> None:
+def cmd_phones(args, cfg, db):
     Pipeline(cfg, db).find_phones(limit=args.limit)
 
 
-def cmd_run(args, cfg, db) -> None:
-    result = Pipeline(cfg, db).run_all(args.source, limit=args.limit)
-    print(f"\nRezultat: {result}")
+def cmd_bilant(args, cfg, db):
+    Pipeline(cfg, db).enrich_bilant(an=args.an, limit=args.limit)
 
 
-def cmd_import(args, cfg, db) -> None:
+def cmd_run(args, cfg, db):
+    print(f"\nRezultat: {Pipeline(cfg, db).run_all(args.source, limit=args.limit)}")
+
+
+def cmd_import(args, cfg, db):
     path = Path(args.file)
     if not path.exists():
         sys.exit(f"Fișierul nu există: {path}")
-    noi = 0
-    total = 0
+    noi = total = 0
     for company in iter_companies_from_file(path, sursa=args.sursa):
         total += 1
-        if db.insert_new(company):
-            noi += 1
-    print(f"Import terminat: {noi} firme noi adăugate din {total} rânduri citite.")
+        noi += 1 if db.insert_new(company) else 0
+    print(f"Import terminat: {noi} firme noi din {total} rânduri citite.")
 
 
-def cmd_verify(args, cfg, db) -> None:
-    """Confruntă firmele din baza de date cu API-ul oficial ANAF.
-
-    Pentru fiecare firmă interoghează ANAF și raportează dacă denumirea se
-    confirmă și dacă ANAF returnează un telefon. Util ca să vezi ce date
-    dintr-un fișier importat sunt reale.
-    """
+def cmd_verify(args, cfg, db):
     session = ThrottledSession(
-        min_interval=cfg.anaf_min_interval,
-        timeout=cfg.http_timeout,
+        min_interval=cfg.anaf_min_interval, timeout=cfg.http_timeout,
         user_agent=cfg.user_agent,
     )
     client = AnafClient(cfg, session)
@@ -89,79 +145,72 @@ def cmd_verify(args, cfg, db) -> None:
     cuis = [c.cui for c in companies]
     print(f"Interoghez ANAF pentru {len(cuis)} firme...\n")
     results = client.lookup(cuis)
-
-    confirmate = 0
-    cu_telefon_anaf = 0
+    confirmate = cu_tel = 0
     for c in companies:
         anaf = results.get(c.cui)
         if anaf is None:
-            print(f"  [NEGĂSIT în ANAF] CUI {c.cui} — {c.denumire}")
+            print(f"  [NEGĂSIT] CUI {c.cui} — {c.denumire}")
             continue
         confirmate += 1
-        nume_ok = _norm(anaf.denumire) == _norm(c.denumire) if c.denumire else None
-        tel_anaf = "DA" if anaf.telefon else "nu"
-        if anaf.telefon:
-            cu_telefon_anaf += 1
-        flag = "OK" if nume_ok in (True, None) else "DIFERĂ"
-        print(
-            f"  [{flag}] CUI {c.cui}: fișier='{c.denumire}' | ANAF='{anaf.denumire}' "
-            f"| telefon în ANAF: {tel_anaf}"
-        )
-
-    print(
-        f"\nRezumat: {confirmate}/{len(cuis)} găsite în ANAF; "
-        f"{cu_telefon_anaf} au telefon returnat de ANAF."
-    )
-    db.log_run(
-        etapa="verify", sursa="anaf", inceput="",
-        firme_procesate=len(cuis),
-        detalii=f"{confirmate} confirmate, {cu_telefon_anaf} cu telefon ANAF",
-    )
+        cu_tel += 1 if anaf.telefon else 0
+        nume_ok = _norm(anaf.denumire) == _norm(c.denumire) if c.denumire else True
+        flag = "OK" if nume_ok else "DIFERĂ"
+        print(f"  [{flag}] CUI {c.cui}: fișier='{c.denumire}' | ANAF='{anaf.denumire}' "
+              f"| tel ANAF: {'DA' if anaf.telefon else 'nu'}")
+    print(f"\nRezumat: {confirmate}/{len(cuis)} în ANAF; {cu_tel} cu telefon la ANAF.")
 
 
-def cmd_stats(args, cfg, db) -> None:
+def cmd_stats(args, cfg, db):
     s = db.stats()
     print("Statistici bază de date")
-    print("-" * 30)
-    print(f"  Total firme:             {s['total']}")
-    print(f"  Verificate la ANAF:      {s['verificate_anaf']}")
-    print(f"  Cu telefon:              {s['cu_telefon']}")
-    print(f"  Telefon căutat:          {s['telefon_cautat']}")
-    print(f"  Plătitori de TVA:        {s['platitori_tva']}")
+    print("=" * 40)
+    print(f"  Total firme:          {s['total']}")
+    print(f"  Verificate ANAF:      {s['verificate_anaf']}")
+    print(f"  Cu telefon:           {s['cu_telefon']}")
+    print(f"  Cu email:             {s['cu_email']}")
+    print(f"  Cu website:           {s['cu_website']}")
+    print(f"  Plătitori TVA:        {s['platitori_tva']}")
+    print(f"  Inactive/radiate:     {s['inactive']}")
+    print(f"  Cu bilanț:            {s['cu_bilant']}")
     if s["total"]:
-        pct = 100 * s["cu_telefon"] / s["total"]
-        print(f"  Acoperire telefon:       {pct:.1f}%")
+        print(f"  Acoperire telefon:    {100 * s['cu_telefon'] / s['total']:.1f}%")
+    if s["pe_sectiune"]:
+        print("\n  Pe secțiuni CAEN:")
+        for sec, n in list(s["pe_sectiune"].items())[:12]:
+            print(f"    {sec}: {n}")
+    if s["top_judete"]:
+        print("\n  Top județe:")
+        for jud, n in s["top_judete"].items():
+            print(f"    {jud}: {n}")
 
 
-def cmd_export(args, cfg, db) -> None:
+def cmd_filter(args, cfg, db):
+    companies = db.query(**filters_from_args(args))
+    print(f"{len(companies)} firme găsite:\n")
+    for c in companies:
+        tel = c.telefon or "-"
+        caen = f"{c.cod_caen or '-'} {c.caen_descriere or ''}".strip()
+        print(f"  {c.cui} | {c.denumire or '-'} | {c.judet or '-'}/{c.localitate or '-'} "
+              f"| tel: {tel} | CAEN: {caen}")
+
+
+def cmd_export(args, cfg, db):
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    companies = list(db.iter_all())
-    if args.only_with_phone:
-        companies = [c for c in companies if c.telefon]
-    if args.judet:
-        companies = [c for c in companies if (c.judet or "").upper() == args.judet.upper()]
-
-    columns = [
-        "cui", "denumire", "nr_reg_com", "cod_caen", "judet", "localitate",
-        "telefon", "telefon_sursa", "email", "website", "adresa",
-        "stare_inregistrare", "data_inregistrare", "scop_tva", "sursa",
-        "data_colectare", "anaf_verificat",
-    ]
-
+    companies = db.query(**filters_from_args(args))
     if args.format == "xlsx" or out.suffix.lower() == ".xlsx":
-        _export_xlsx(out, companies, columns)
+        _export_xlsx(out, companies)
     else:
         with out.open("w", encoding="utf-8", newline="") as fh:
             writer = csv.writer(fh)
-            writer.writerow(columns)
+            writer.writerow(EXPORT_COLUMNS)
             for c in companies:
                 row = c.to_row()
-                writer.writerow([row.get(col) for col in columns])
+                writer.writerow([row.get(col) for col in EXPORT_COLUMNS])
     print(f"Export scris: {out} ({len(companies)} firme)")
 
 
-def _export_xlsx(out: Path, companies, columns) -> None:
+def _export_xlsx(out: Path, companies):
     try:
         import openpyxl  # type: ignore
     except ImportError:
@@ -169,10 +218,10 @@ def _export_xlsx(out: Path, companies, columns) -> None:
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Firme"
-    ws.append(columns)
+    ws.append(EXPORT_COLUMNS)
     for c in companies:
         row = c.to_row()
-        ws.append([row.get(col) for col in columns])
+        ws.append([row.get(col) for col in EXPORT_COLUMNS])
     wb.save(out)
 
 
@@ -184,24 +233,29 @@ def _norm(text) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Colectare firme noi (ONRC/Monitorul Oficial) + ANAF")
-    p.add_argument("-v", "--verbose", action="store_true", help="log detaliat")
+    p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="command", required=True)
 
     sp = sub.add_parser("collect", help="colectează firme noi dintr-o sursă")
     sp.add_argument("--source", default="onrc", choices=["onrc", "monitorul_oficial"])
     sp.set_defaults(func=cmd_collect)
 
-    sp = sub.add_parser("enrich", help="completează firmele cu date de la ANAF")
-    sp.add_argument("--limit", type=int, default=None)
+    sp = sub.add_parser("enrich", help="date generale de la ANAF")
+    sp.add_argument("--limit", type=int)
     sp.set_defaults(func=cmd_enrich)
 
     sp = sub.add_parser("phones", help="caută telefoane (best-effort)")
-    sp.add_argument("--limit", type=int, default=None)
+    sp.add_argument("--limit", type=int)
     sp.set_defaults(func=cmd_phones)
 
-    sp = sub.add_parser("run", help="fluxul complet: collect + enrich + phones")
+    sp = sub.add_parser("bilant", help="indicatori financiari de la ANAF")
+    sp.add_argument("--an", type=int, required=True)
+    sp.add_argument("--limit", type=int)
+    sp.set_defaults(func=cmd_bilant)
+
+    sp = sub.add_parser("run", help="collect + enrich + phones")
     sp.add_argument("--source", default="onrc", choices=["onrc", "monitorul_oficial"])
-    sp.add_argument("--limit", type=int, default=None)
+    sp.add_argument("--limit", type=int)
     sp.set_defaults(func=cmd_run)
 
     sp = sub.add_parser("import", help="importă firme dintr-un fișier .xlsx/.csv")
@@ -209,24 +263,27 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--sursa", default="import")
     sp.set_defaults(func=cmd_import)
 
-    sp = sub.add_parser("verify", help="confruntă datele cu API-ul oficial ANAF")
-    sp.add_argument("--limit", type=int, default=None)
+    sp = sub.add_parser("verify", help="confruntă datele cu ANAF real")
+    sp.add_argument("--limit", type=int)
     sp.set_defaults(func=cmd_verify)
 
-    sp = sub.add_parser("stats", help="statistici")
+    sp = sub.add_parser("stats", help="statistici detaliate")
     sp.set_defaults(func=cmd_stats)
 
-    sp = sub.add_parser("export", help="exportă în CSV/XLSX")
+    sp = sub.add_parser("filter", help="filtrează și afișează firme")
+    add_filter_args(sp)
+    sp.set_defaults(func=cmd_filter)
+
+    sp = sub.add_parser("export", help="exportă (filtrat) în CSV/XLSX")
     sp.add_argument("--out", default="export/firme.csv")
     sp.add_argument("--format", choices=["csv", "xlsx"], default="csv")
-    sp.add_argument("--only-with-phone", action="store_true")
-    sp.add_argument("--judet", default=None)
+    add_filter_args(sp)
     sp.set_defaults(func=cmd_export)
 
     return p
 
 
-def main(argv=None) -> None:
+def main(argv=None):
     args = build_parser().parse_args(argv)
     setup_logging(args.verbose)
     cfg = load_config()

@@ -7,7 +7,7 @@ from typing import Optional
 
 from .config import Config
 from .db import Database
-from .enrich import AnafClient, build_phone_finders
+from .enrich import AnafClient, BilantClient, build_phone_finders
 from .models import Company
 from .sources import REGISTRY
 from .util import ThrottledSession, now_iso
@@ -138,6 +138,39 @@ class Pipeline:
         )
         log.info("Telefoane găsite: %d din %d firme.", gasite, len(pending))
         return gasite
+
+    # ------------------------------------------------------------------ #
+    # 4. ÎMBOGĂȚIRE FINANCIARĂ (bilanț)                                   #
+    # ------------------------------------------------------------------ #
+
+    def enrich_bilant(self, an: int, limit: Optional[int] = None) -> int:
+        """Adaugă indicatori financiari (cifră de afaceri, profit, salariați)
+        pentru firmele care nu au fost încă verificate financiar.
+        """
+        started = now_iso()
+        session = self._session(min_interval=self.config.anaf_min_interval)
+        client = BilantClient(self.config, session)
+
+        pending = list(self.db.iter_needing_bilant(limit=limit))
+        if not pending:
+            log.info("Nu există firme de verificat financiar.")
+            return 0
+
+        log.info("Interoghez bilanțul (an %s) pentru %d firme...", an, len(pending))
+        cu_date = 0
+        for company in pending:
+            client.enrich(company, an)
+            self.db.update(company)
+            if company.cifra_afaceri is not None or company.numar_salariati is not None:
+                cu_date += 1
+
+        self.db.log_run(
+            etapa="bilant", sursa="anaf", inceput=started,
+            firme_procesate=len(pending),
+            detalii=f"{cu_date} cu date financiare (an {an}) din {len(pending)}",
+        )
+        log.info("Bilanț: %d firme cu date financiare din %d.", cu_date, len(pending))
+        return cu_date
 
     # ------------------------------------------------------------------ #
     # Flux complet                                                        #

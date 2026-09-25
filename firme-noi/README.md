@@ -59,15 +59,23 @@ python run.py enrich
 # 3. Caută telefoane (best-effort, după providerii din .env)
 python run.py phones
 
-# — sau tot fluxul dintr-o comandă —
+# 4. (opțional) indicatori financiari din bilanț – util pentru firme cu vechime
+python run.py bilant --an 2024
+
+# — sau tot fluxul de bază dintr-o comandă —
 python run.py run --source onrc
 
-# Statistici
+# Statistici detaliate (pe secțiuni CAEN, pe județe, acoperire contact)
 python run.py stats
 
-# Export pentru lucru (CSV sau XLSX)
-python run.py export --out export/firme.csv --only-with-phone
-python run.py export --out export/iasi.xlsx --format xlsx --judet Iași
+# Filtrează și afișează
+python run.py filter --sectiune F --with-phone --judet Cluj   # construcții cu telefon, Cluj
+python run.py filter --caen-prefix 62 --active                # tot IT-ul, doar active
+python run.py filter --without-phone                          # ce mai are nevoie de telefon
+
+# Export (filtrele de mai jos merg și la export)
+python run.py export --out export/firme.csv --with-phone
+python run.py export --out export/iasi.xlsx --format xlsx --judet Iași --sectiune F
 ```
 
 ### Import dintr-un fișier existent
@@ -104,6 +112,37 @@ Pentru confirmarea că o firmă e într-adevăr recentă, folosește
 
 ---
 
+## Ce conține baza de date
+
+Pentru fiecare firmă se rețin (când sursa le oferă):
+
+| Grup | Câmpuri |
+|------|---------|
+| **Identificare** | CUI, denumire, nr. reg. com., EUID, formă juridică / organizare / proprietate |
+| **Activitate** | cod CAEN, descrierea CAEN, secțiunea economică (A–U) și denumirea ei |
+| **Stare & fiscal** | stare înregistrare, data înmatriculării, actul de înființare, inactiv/radiat (+ date), plătitor TVA (+ perioadă), TVA la încasare, split TVA, RO e-Factura, organ fiscal, IBAN |
+| **Adresă** | județ, localitate, stradă, număr, cod poștal, țară, adresă completă + domiciliu fiscal |
+| **Contact** | telefon (+ sursa lui), fax, email, website |
+| **Financiar (bilanț)** | an, cifră de afaceri, profit net, pierdere netă, nr. salariați, active, datorii, capitaluri |
+| **Metadate** | sursa descoperirii, data colectării/actualizării, ce etape au rulat |
+
+Există și un tabel de referință `caen_ref` (cod → descriere + secțiune) și un
+tabel `runs` cu jurnalul fiecărei rulări.
+
+## Filtre disponibile (comenzile `filter` și `export`)
+
+`--judet` · `--localitate` · `--caen` (cod exact) · `--caen-prefix` (ex. `62` =
+tot IT-ul) · `--sectiune` (A–U, ex. `F` = construcții) · `--denumire` ·
+`--with-phone` / `--without-phone` · `--with-email` · `--platitor-tva` ·
+`--active` (exclude radiate/inactive) · `--min-salariati N` · `--min-cifra X` ·
+`--dupa YYYY-MM-DD` / `--inainte YYYY-MM-DD` · `--order-by` · `--desc` · `--limit`
+
+Secțiunile CAEN utile: **F** construcții, **G** comerț, **J** IT & comunicații,
+**H** transport, **M** servicii profesionale, **I** hoteluri/restaurante,
+**Q** sănătate, **C** producție.
+
+---
+
 ## Automatizare (rulare zilnică)
 
 ```bash
@@ -117,11 +156,12 @@ crontab -e     # adaugă linia din scripts/crontab.example
 
 ```
 firme-noi/
-├── run.py                    # CLI (collect / enrich / phones / run / import / verify / stats / export)
+├── run.py                    # CLI (collect/enrich/phones/bilant/run/import/verify/stats/filter/export)
 ├── firme/
 │   ├── config.py             # configurare din .env
-│   ├── models.py             # modelul Company
-│   ├── db.py                 # SQLite: schemă, inserare cu deduplicare, statistici
+│   ├── models.py             # modelul Company (schema bogată)
+│   ├── db.py                 # SQLite: schemă auto, migrare, deduplicare, filtre, statistici
+│   ├── caen.py               # nomenclator CAEN (cod → descriere + secțiune A–U)
 │   ├── util.py               # HTTP cu throttling+retry, normalizare telefoane
 │   ├── importers.py          # import din .xlsx / .csv
 │   ├── pipeline.py           # orchestrarea fluxului
@@ -129,7 +169,8 @@ firme-noi/
 │   │   ├── onrc_opendata.py  #   ONRC / data.gov.ro (recomandat)
 │   │   └── monitorul_oficial.py  # Monitorul Oficial Partea IV (best-effort, PDF)
 │   └── enrich/               # cu CE le completăm
-│       ├── anaf.py           #   API oficial ANAF (adresă, CAEN, TVA…)
+│       ├── anaf.py           #   API oficial ANAF (adresă, CAEN, TVA, stare…)
+│       ├── bilant.py         #   indicatori financiari (cifră afaceri, profit, salariați)
 │       └── phone.py          #   telefoane: anaf / google / web
 ├── scripts/                  # rulare zilnică + exemplu cron
 └── tests/                    # teste (fără rețea)

@@ -21,6 +21,7 @@ import logging
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
+from .. import caen as caen_ref
 from ..config import Config
 from ..models import Company
 from ..util import ThrottledSession, chunked, normalize_phone, today_str
@@ -75,38 +76,78 @@ class AnafClient:
             return None
 
         sediu = entry.get("adresa_sediu_social") or {}
+        fiscal = entry.get("adresa_domiciliu_fiscal") or {}
         tva = entry.get("inregistrare_scop_Tva") or {}
+        rtvai = entry.get("inregistrare_RTVAI") or {}
+        inactiv = entry.get("stare_inactiv") or {}
+        split = entry.get("inregistrare_SplitTVA") or {}
 
-        # Adresa: preferăm câmpul complet, altfel compunem din componente.
-        adresa = general.get("adresa") or _compose_address(sediu)
+        cod_caen = general.get("cod_CAEN") or None
+        caen_info = caen_ref.enrich_caen(cod_caen)
 
-        # Telefon: câmp din date_generale, populat când firma l-a declarat.
+        # Adresa completă: preferăm câmpul din date_generale, altfel o compunem.
+        adresa = general.get("adresa") or _compose_address(sediu, "s")
+        adresa_fiscala = _compose_address(fiscal, "d")
+
         telefon = normalize_phone(general.get("telefon"))
+
+        # Perioada TVA (dacă există, luăm ultima).
+        tva_inceput = tva_sfarsit = None
+        perioade = tva.get("perioade_TVA") or []
+        if perioade:
+            ultima = perioade[-1]
+            tva_inceput = ultima.get("data_inceput_ScpTVA") or None
+            tva_sfarsit = ultima.get("data_sfarsit_ScpTVA") or None
 
         return Company(
             cui=int(cui),
             denumire=general.get("denumire") or None,
             nr_reg_com=general.get("nrRegCom") or None,
-            cod_caen=general.get("cod_CAEN") or None,
-            judet=sediu.get("sdenumire_Judet") or None,
-            localitate=sediu.get("sdenumire_Localitate") or None,
-            adresa=adresa or None,
-            cod_postal=general.get("codPostal") or sediu.get("scod_Postal") or None,
+            forma_juridica=general.get("forma_juridica") or None,
+            forma_organizare=general.get("forma_organizare") or None,
+            forma_proprietate=general.get("forma_de_proprietate") or None,
+            cod_caen=cod_caen,
+            caen_descriere=caen_info["caen_descriere"],
+            caen_sectiune=caen_info["caen_sectiune"],
+            caen_sectiune_nume=caen_info["caen_sectiune_nume"],
             stare_inregistrare=general.get("stare_inregistrare") or None,
             data_inregistrare=general.get("data_inregistrare") or None,
-            scop_tva=bool(tva.get("scpTVA")) if "scpTVA" in tva else None,
+            act=general.get("act") or None,
+            inactiv=bool(inactiv.get("statusInactivi")) if "statusInactivi" in inactiv else None,
+            data_inactivare=inactiv.get("dataInactivare") or None,
+            data_reactivare=inactiv.get("dataReactivare") or None,
+            data_radiere=inactiv.get("dataRadiere") or None,
+            platitor_tva=bool(tva.get("scpTVA")) if "scpTVA" in tva else None,
+            tva_data_inceput=tva_inceput,
+            tva_data_sfarsit=tva_sfarsit,
+            tva_la_incasare=bool(rtvai.get("statusTvaIncasare")) if "statusTvaIncasare" in rtvai else None,
+            split_tva=bool(split.get("statusSplitTVA")) if "statusSplitTVA" in split else None,
+            ro_e_factura=bool(general.get("statusRO_e_Factura")) if "statusRO_e_Factura" in general else None,
+            organ_fiscal=general.get("organFiscalCompetent") or None,
+            iban=general.get("iban") or None,
+            judet=sediu.get("sdenumire_Judet") or None,
+            localitate=sediu.get("sdenumire_Localitate") or None,
+            strada=sediu.get("sdenumire_Strada") or None,
+            numar=sediu.get("snumar_Strada") or None,
+            cod_postal=general.get("codPostal") or sediu.get("scod_Postal") or None,
+            tara=sediu.get("stara") or None,
+            adresa=adresa or None,
+            adresa_fiscala=adresa_fiscala,
             telefon=telefon,
             telefon_sursa="anaf" if telefon else None,
+            fax=general.get("fax") or None,
             anaf_verificat=True,
         )
 
 
-def _compose_address(sediu: dict) -> Optional[str]:
+def _compose_address(adr: dict, prefix: str) -> Optional[str]:
+    """Compune o adresă din componentele ANAF. `prefix` = 's' (sediu) sau 'd' (fiscal)."""
     parts = [
-        sediu.get("sdenumire_Strada"),
-        sediu.get("snumar_Strada"),
-        sediu.get("sdenumire_Localitate"),
-        sediu.get("sdenumire_Judet"),
+        adr.get(f"{prefix}denumire_Strada"),
+        adr.get(f"{prefix}numar_Strada"),
+        adr.get(f"{prefix}detalii_Adresa"),
+        adr.get(f"{prefix}denumire_Localitate"),
+        adr.get(f"{prefix}denumire_Judet"),
     ]
-    text = ", ".join(p for p in parts if p)
+    text = ", ".join(str(p).strip() for p in parts if p)
     return text or None

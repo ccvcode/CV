@@ -10,8 +10,10 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from firme import caen
 from firme.db import Database
 from firme.enrich.anaf import AnafClient
+from firme.enrich.bilant import BilantClient
 from firme.models import Company
 from firme.util import extract_phone, normalize_phone
 
@@ -81,16 +83,21 @@ class TestAnafParsing(unittest.TestCase):
             "date_generale": {
                 "cui": 42, "denumire": "EXEMPLU SRL", "nrRegCom": "J40/1/2026",
                 "cod_CAEN": "6201", "adresa": "Str. X", "data_inregistrare": "2026-01-01",
-                "stare_inregistrare": "INREGISTRAT",
+                "stare_inregistrare": "INREGISTRAT", "forma_juridica": "SRL",
+                "statusRO_e_Factura": True,
             },
             "inregistrare_scop_Tva": {"scpTVA": True},
+            "stare_inactiv": {"statusInactivi": False},
             "adresa_sediu_social": {"sdenumire_Judet": "BUCURESTI", "sdenumire_Localitate": "SECTOR 1"},
         }
         c = AnafClient._parse_entry(entry)
         self.assertEqual(c.cui, 42)
         self.assertEqual(c.denumire, "EXEMPLU SRL")
         self.assertEqual(c.cod_caen, "6201")
-        self.assertTrue(c.scop_tva)
+        self.assertEqual(c.caen_sectiune, "J")            # 62 -> secțiunea J
+        self.assertTrue(c.platitor_tva)
+        self.assertTrue(c.ro_e_factura)
+        self.assertFalse(c.inactiv)
         self.assertTrue(c.anaf_verificat)
         self.assertEqual(c.judet, "BUCURESTI")
 
@@ -106,6 +113,70 @@ class TestAnafParsing(unittest.TestCase):
         entry = {"date_generale": {"cui": 8, "denumire": "FĂRĂ TEL SRL"}}
         c = AnafClient._parse_entry(entry)
         self.assertIsNone(c.telefon)
+
+
+class TestCaen(unittest.TestCase):
+    def test_section_by_division(self):
+        self.assertEqual(caen.caen_section("4120")[0], "F")   # construcții
+        self.assertEqual(caen.caen_section("6201")[0], "J")   # IT
+        self.assertEqual(caen.caen_section("4711")[0], "G")   # comerț
+        self.assertEqual(caen.caen_section("8623")[0], "Q")   # sănătate
+        self.assertEqual(caen.caen_section(None)[0], None)
+
+    def test_description(self):
+        self.assertIn("soft", (caen.caen_description("6201") or "").lower())
+        self.assertIsNone(caen.caen_description("9999"))
+
+
+class TestBilantParsing(unittest.TestCase):
+    def test_parse_indicators(self):
+        body = {"an": 2024, "cui": 1, "i": [
+            {"val_den_indicator": "Cifra de afaceri neta", "val_indicator": 1500000},
+            {"val_den_indicator": "Profit net", "val_indicator": 200000},
+            {"val_den_indicator": "Numar mediu de salariati", "val_indicator": 12},
+        ]}
+        out = BilantClient._parse(body, 2024)
+        self.assertEqual(out["cifra_afaceri"], 1500000)
+        self.assertEqual(out["profit_net"], 200000)
+        self.assertEqual(out["numar_salariati"], 12)
+        self.assertTrue(out["bilant_verificat"])
+
+
+class TestQuery(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.db = Database(self.tmp.name)
+        self.db.insert_new(Company(cui=1, denumire="ALFA CONSTRUCT SRL", judet="Cluj",
+                                   cod_caen="4120", caen_sectiune="F", telefon="0721000001",
+                                   platitor_tva=True))
+        self.db.insert_new(Company(cui=2, denumire="BETA SOFT SRL", judet="Cluj",
+                                   cod_caen="6201", caen_sectiune="J"))
+        self.db.insert_new(Company(cui=3, denumire="GAMA TRANS SRL", judet="Iași",
+                                   cod_caen="4941", caen_sectiune="H", telefon="0721000003"))
+
+    def tearDown(self):
+        self.db.close()
+        os.unlink(self.tmp.name)
+
+    def test_filter_by_section(self):
+        res = self.db.query(sectiune="F")
+        self.assertEqual([c.cui for c in res], [1])
+
+    def test_filter_by_judet_and_phone(self):
+        res = self.db.query(judet="Cluj", with_phone=True)
+        self.assertEqual([c.cui for c in res], [1])
+
+    def test_filter_without_phone(self):
+        res = self.db.query(with_phone=False)
+        self.assertEqual([c.cui for c in res], [2])
+
+    def test_filter_caen_prefix(self):
+        res = self.db.query(caen_prefix="41")
+        self.assertEqual([c.cui for c in res], [1])
+
+    def test_filter_platitor_tva(self):
+        res = self.db.query(platitor_tva=True)
+        self.assertEqual([c.cui for c in res], [1])
 
 
 if __name__ == "__main__":

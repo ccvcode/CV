@@ -18,5 +18,5 @@ python run.py stats
 
 # Export zilnic doar cu firmele care au telefon
 STAMP="$(date '+%Y-%m-%d')"
-python run.py export --out "export/firme_${STAMP}.csv" --only-with-phone
+python run.py export --out "export/firme_${STAMP}.csv" --with-phone
 echo "[$(date '+%F %T')] Gata."
