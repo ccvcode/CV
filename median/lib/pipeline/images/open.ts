@@ -39,6 +39,14 @@ async function getJson<T>(url: string, headers: Record<string, string> = {}): Pr
   }
 }
 
+const foldName = (s: string) =>
+  s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
 const strip = (s?: string) => (s ?? "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 
 interface CommonsPage {
@@ -74,7 +82,7 @@ function fromCommonsPage(p: CommonsPage): OpenImage | undefined {
     creditUrl: ii.descriptionurl,
     license,
     licenseUrl: strip(md.LicenseUrl?.value) || undefined,
-    title: p.title.replace(/^File:/, ""),
+    title: [p.title.replace(/^File:/, "").replace(/\.\w+$/, ""), strip(md.ImageDescription?.value).slice(0, 300)].filter(Boolean).join(" — "),
   };
 }
 
@@ -99,8 +107,10 @@ async function commonsFiles(titles: string[]): Promise<OpenImage[]> {
 export async function wikidataImage(name: string): Promise<OpenImage | undefined> {
   if (!config.images.commons) return undefined;
   const s = new URLSearchParams({ action: "wbsearchentities", format: "json", language: "ro", uselang: "ro", type: "item", limit: "3", search: name });
-  const found = await getJson<{ search?: { id: string; label?: string; description?: string }[] }>(`https://www.wikidata.org/w/api.php?${s}`);
-  const ids = (found.search ?? []).map((x) => x.id).slice(0, 3);
+  const found = await getJson<{ search?: { id: string; label?: string; description?: string; match?: { text?: string } }[] }>(`https://www.wikidata.org/w/api.php?${s}`);
+  // Doar entitățile al căror nume corespunde exact (altfel riscăm poza altei persoane cu nume asemănător).
+  const want = foldName(name);
+  const ids = (found.search ?? []).filter((x) => [x.label, x.match?.text].some((l) => l && foldName(l) === want)).map((x) => x.id).slice(0, 2);
   if (!ids.length) return undefined;
   const e = new URLSearchParams({ action: "wbgetentities", format: "json", ids: ids.join("|"), props: "claims" });
   const ents = await getJson<{ entities?: Record<string, { claims?: Record<string, { mainsnak?: { datavalue?: { value?: string } } }[]> }> }>(

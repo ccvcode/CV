@@ -181,3 +181,17 @@ export function formatSources(list: PromptSource[]): string {
 function esc(s: string): string {
   return s.replace(/"/g, "'").replace(/[<>]/g, "");
 }
+
+/* ---------- Alegerea pozei: relevanța pentru articol ---------- */
+
+export const ImagePickSchema = z.object({ index: num, reason: str(200).default("") });
+export const ImagePickShape = z.object({ index: z.number(), reason: z.string() });
+
+export const IMAGE_PICK_SYSTEM = `Ești editor foto la Median. Primești titlul și rezumatul unui articol și o listă numerotată de fotografii candidate, fiecare descrisă prin titlul și descrierea fișierului.
+Alege fotografia care ilustrează cel mai bine SUBIECTUL CONCRET al articolului: persoana, locul, instituția sau tipul de eveniment despre care este vorba.
+Reguli:
+- Respinge hărți, diagrame, grafice, logo-uri, steme, documente scanate, semnături și fotografii vechi fără legătură directă.
+- Respinge fotografiile cu altă persoană sau alt loc decât cele din articol.
+- Respinge fotografiile care ar putea induce în eroare (de ex. o imagine de război pentru o știre economică).
+- Dacă nicio fotografie nu se potrivește, răspunde cu index 0.
+Răspunde DOAR cu JSON: {"index": <numărul fotografiei alese sau 0>, "reason": "motiv scurt"}`;

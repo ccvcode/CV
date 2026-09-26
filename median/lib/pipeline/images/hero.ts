@@ -1,7 +1,9 @@
-import { config } from "../../core/config";
+import { config, llmEnabled } from "../../core/config";
 import { db, logEvent } from "../../core/db";
 import type { CategorySlug } from "../../core/types";
 import { httpGetBuffer } from "../http";
+import { chatJson } from "../llm";
+import { IMAGE_PICK_SYSTEM, ImagePickSchema, ImagePickShape } from "../prompts";
 import { makeCard } from "./card";
 import { commonsSearch, pexelsSearch, unsplashSearch, unsplashTrackDownload, wikidataImage, type OpenImage } from "./open";
 import { makeSourceThumb } from "./source";
@@ -66,10 +68,14 @@ export async function chooseHero(storyId: string): Promise<number | null> {
   }
 
   const entities = article ? (JSON.parse(article.entities) as { name: string; type: string }[]) : [];
-  const tryOpen = async (label: string, fn: () => Promise<OpenImage[] | OpenImage | undefined>) => {
+  const dek = article ? ((d.prepare("SELECT dek FROM articles WHERE id = ?").get(article.id) as { dek: string | null }).dek ?? "") : "";
+  // `pick`: rezultatele unei căutări trec prin editorul foto AI (relevanța față de articol);
+  // imaginea oficială Wikidata a unei entități numite exact în articol nu mai are nevoie de verificare.
+  const tryOpen = async (label: string, fn: () => Promise<OpenImage[] | OpenImage | undefined>, pick = true) => {
     try {
       const r = await fn();
-      const list = (Array.isArray(r) ? r : r ? [r] : []).filter((x) => !recentlyUsed.has(x.url));
+      let list = (Array.isArray(r) ? r : r ? [r] : []).filter((x) => !recentlyUsed.has(x.url));
+      if (pick && list.length) list = await pickRelevant(headline, dek, list.slice(0, 8));
       for (const cand of list.slice(0, 3)) {
         const id = await storeOpen(cand).catch(() => null);
         if (id) return id;
@@ -83,7 +89,7 @@ export async function chooseHero(storyId: string): Promise<number | null> {
   // 2–3. Wikidata / Commons după entități (persoane și locuri primele).
   const ordered = [...entities].sort((a, b) => rank(a.type) - rank(b.type)).slice(0, 3);
   for (const e of ordered) {
-    const id = await tryOpen("wikidata", () => wikidataImage(e.name));
+    const id = await tryOpen("wikidata", () => wikidataImage(e.name), false);
     if (id) return setHero(storyId, id);
   }
   for (const e of ordered.slice(0, 2)) {
@@ -107,6 +113,38 @@ export async function chooseHero(storyId: string): Promise<number | null> {
   if (story.hero_image_id) return story.hero_image_id;
   const card = await makeCard(storyId, { headline, category: story.category, sources: story.source_count, region: story.region });
   return setHero(storyId, card);
+}
+
+/**
+ * Editorul foto AI: alege dintre candidați fotografia relevantă pentru articol, după titlul și
+ * descrierea fiecărui fișier. Întoarce lista cu alegerea pe primul loc sau goală dacă nimic nu se potrivește.
+ * Fără AI configurat, lista rămâne neschimbată.
+ */
+async function pickRelevant(headline: string, dek: string, list: OpenImage[]): Promise<OpenImage[]> {
+  if (!llmEnabled()) return list;
+  const described = list.filter((x) => x.title?.trim());
+  if (!described.length) return [];
+  const user = `ARTICOL\nTitlu: ${headline}\nRezumat: ${dek.slice(0, 500)}\n\nFOTOGRAFII CANDIDATE\n${described
+    .map((x, i) => `${i + 1}. ${x.title!.slice(0, 300)}`)
+    .join("\n")}`;
+  try {
+    const { data } = await chatJson({
+      target: "verify",
+      system: IMAGE_PICK_SYSTEM,
+      user,
+      schema: ImagePickSchema,
+      shape: ImagePickShape,
+      schemaName: "alegere_poza",
+      maxTokens: 200,
+      temperature: 0,
+    });
+    const chosen = described[data.index - 1];
+    return chosen ? [chosen] : [];
+  } catch (e) {
+    // Dacă AI-ul nu răspunde, nu publicăm o poză neverificată: se trece la următoarea variantă.
+    logEvent("warn", `imagini (relevanță): ${(e as Error).message}`);
+    return [];
+  }
 }
 
 function rank(type: string): number {

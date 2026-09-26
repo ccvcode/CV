@@ -67,6 +67,7 @@ export function mockChat(target: "write" | "verify", schemaName: string, _system
     return { content, model: "median-demo-mock", tokensIn: Math.round(user.length / 3.5), tokensOut: Math.round(content.length / 3.5) };
   };
   if (target === "verify") return reply({ ok: true, issues: [] });
+  if (schemaName === "alegere_poza") return reply({ index: 1, reason: "demo" });
 
   const sources = parseSources(user);
   const truth = demoTruth(sources.map((s) => s.title));

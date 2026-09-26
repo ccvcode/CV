@@ -17,7 +17,7 @@ articol primește automat o fotografie.
 | **Verificare** | Cifrele, citatele și numele trebuie să existe în surse. Textul nu are voie să copieze fraze din surse. Un al doilea apel AI caută afirmații nesusținute. |
 | **Subiecte sensibile** | Decesele, minorii și cazurile de justiție așteaptă aprobarea ta în `/admin`. |
 | **Știri scurte** | Subiectele cu o singură sursă primesc o știre scurtă originală, cu link către sursă. |
-| **Poze automate** | Poza vine, în ordine, din: Wikidata/Wikimedia Commons (persoane, instituții, locuri), apoi Unsplash/Pexels, apoi o copertă grafică generată. Pozele publicațiilor apar doar ca miniaturi, cu credit. |
+| **Poze automate** | Poza vine, în ordine, din: poza publicației-sursă (doar la sursele marcate „Poze principale: DA” în /admin/surse, adică cele cu acord), portretul oficial Wikidata al persoanei/locului numit exact în știre, căutare pe Wikimedia Commons, apoi Unsplash/Pexels. Rezultatele căutărilor trec printr-un „editor foto” AI care respinge pozele fără legătură cu articolul (hărți, logo-uri, alte persoane). Ultima variantă e o copertă grafică generată. La celelalte surse, pozele apar doar ca miniaturi, cu credit. |
 | **Design** | Stil editorial „hârtie și cerneală”, cu temă luminoasă și întunecată. Funcționează pe mobil. |
 | **Transparență** | Eticheta AI apare pe fiecare articol (AI Act). Site-ul are pagini de politică editorială, politică AI, corecturi publice și formular pentru drepturi de autor. |
 | **SEO** | NewsArticle JSON-LD, sitemap Google News, RSS general și pe categorii. |
