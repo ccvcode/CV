@@ -14,8 +14,9 @@ from collections import Counter
 from pathlib import Path
 from typing import Iterable
 
-from .classify import este_activa, tip_entitate
+from .classify import PRAG_TELEFON_COMUN, calitate_telefon, este_activa, tip_entitate
 from .models import Company
+from .util import firma_key
 
 # (câmp, antet afișat, lățime coloană, tip)  — tip: text/bool/int/money/mono
 _COLS = [
@@ -24,7 +25,8 @@ _COLS = [
     ("tip_entitate", "Tip entitate", 20, "text"),
     ("activa", "Activă", 8, "bool"),
     ("telefon", "Telefon", 15, "mono"),
-    ("telefon_suspect", "Tel. suspect", 11, "bool"),
+    ("telefon_calitate", "Calitate telefon", 14, "text"),
+    ("telefon_utilizari", "Nr. firme cu același tel.", 12, "int"),
     ("telefon_sursa", "Sursă tel.", 10, "text"),
     ("judet", "Județ", 16, "text"),
     ("localitate", "Localitate", 24, "text"),
@@ -96,6 +98,7 @@ def build_workbook(companies: Iterable[Company], path: Path | str) -> int:
         row = c.to_row()
         row["tip_entitate"] = tip_entitate(c)
         row["activa"] = este_activa(c)
+        row["telefon_calitate"] = calitate_telefon(c)
         cells = []
         for field, _, _, kind in _COLS:
             value = row.get(field)
@@ -134,7 +137,12 @@ def build_workbook(companies: Iterable[Company], path: Path | str) -> int:
         line("Înmatriculate între", f"{date[0]} – {date[-1]}", bold)
     line("Verificate la ANAF", verificate, bold)
     line("Cu telefon", f"{cu_tel} ({round(100 * cu_tel / total) if total else 0}%)", bold)
-    line("  din care de verificat (suspecte)", suspecte)
+    calit = Counter(calitate_telefon(c) for c in companies if c.telefon)
+    line("  OK (număr propriu)", calit.get("OK", 0))
+    line("  Străin", calit.get("Străin", 0))
+    line(f"  Comun (același număr la {PRAG_TELEFON_COMUN}+ firme – contabil/consultant)",
+         calit.get("Comun", 0))
+    line("  Suspect (ex. 0722222222, 0700000000)", suspecte)
     line("Plătitori TVA", sum(1 for c in companies if c.platitor_tva), bold)
     line("Județe distincte", len({c.judet for c in companies if c.judet}), bold)
     s.append([])
@@ -153,6 +161,29 @@ def build_workbook(companies: Iterable[Company], path: Path | str) -> int:
     line("Pe județe", "firme", bold)
     for name, n in Counter(c.judet for c in companies if c.judet).most_common():
         line(name, n)
+
+    # --- Foaia Telefoane comune ---
+    # Numere folosite de mai multe firme: de regulă contabili sau firme de
+    # consultanță care au înființat firmele (pot fi ele însele clienți).
+    comune: dict[str, dict[str, str]] = {}
+    for c in companies:
+        if c.telefon and (c.telefon_utilizari or 0) >= PRAG_TELEFON_COMUN:
+            comune.setdefault(c.telefon, {}).setdefault(
+                firma_key(c.denumire) or str(c.cui), c.denumire or "")
+    if comune:
+        t = wb.create_sheet("Telefoane comune")
+        for col, w in zip("ABCD", (16, 16, 18, 90)):
+            t.column_dimensions[col].width = w
+        hdr = []
+        for label in ("Telefon", "Firme (total)", "Firme în acest fișier", "Exemple"):
+            cell = WriteOnlyCell(t, value=label)
+            cell.fill = header_fill
+            cell.font = header_font
+            hdr.append(cell)
+        t.append(hdr)
+        total_by_tel = {c.telefon: c.telefon_utilizari for c in companies if c.telefon in comune}
+        for tel, names in sorted(comune.items(), key=lambda kv: -total_by_tel[kv[0]]):
+            t.append([tel, total_by_tel[tel], len(names), " | ".join(list(names.values())[:5])])
 
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     wb.save(path)

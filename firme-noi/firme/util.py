@@ -120,21 +120,34 @@ def clean_phone(raw) -> Optional[str]:
     match = _INTL_RE.search(text)
     if match:
         digits = re.sub(r"\D", "", match.group(1))
-        if 8 <= len(digits) <= 15 and not digits.startswith("40"):
+        # Prefixele de țară nu încep cu 0; un număr format numai din zerouri e fals.
+        if (8 <= len(digits) <= 15 and not digits.startswith("40")
+                and digits[0] != "0" and len(set(digits)) > 1):
             return "+" + digits
     return None
 
 
-_SEQUENCES = {"1234567", "2345678", "3456789", "7654321", "8765432", "9876543"}
+_ASC = "0123456789" * 2
+_SEQUENCES = {_ASC[i:i + 7] for i in range(10)} | {_ASC[::-1][i:i + 7] for i in range(10)}
 
 
 def is_suspect_phone(phone: Optional[str]) -> bool:
-    """Semnalează numerele care sunt aproape sigur completate de formă
-    (ex. 0770000000, 0722222222, 0712345678). Nu le ștergem, doar le marcăm."""
+    """Semnalează numerele aproape sigur completate de formă. Nu le ștergem,
+    doar le marcăm (coloana „Calitate telefon").
+
+      0722222222 / 0770000000   – ultimele 7 cifre identice
+      0712345678 / +393474567890 – secvență crescătoare/descrescătoare
+      0780000001 / 0756000000   – cel puțin 6 zerouri în ultimele 7 cifre
+
+    Numerele „de aur" (ex. 0722222727) NU sunt marcate: pot fi reale.
+    """
     if not phone:
         return False
-    tail = re.sub(r"\D", "", phone)[-7:]
-    return len(tail) == 7 and (len(set(tail)) == 1 or tail in _SEQUENCES)
+    digits = re.sub(r"\D", "", phone)
+    tail = digits[-7:]
+    if len(tail) < 7:
+        return True
+    return len(set(tail)) == 1 or tail in _SEQUENCES or tail.count("0") >= 6
 
 
 # --------------------------------------------------------------------------- #
@@ -199,3 +212,13 @@ class ThrottledSession:
 
     def post(self, url: str, **kwargs) -> requests.Response:
         return self.request("POST", url, **kwargs)
+
+
+_CEDILLA = str.maketrans("ŞşŢţ", "ȘșȚț")
+
+
+def firma_key(denumire: Optional[str]) -> str:
+    """Cheie de comparare a denumirilor: ignoră spațiile, punctuația și
+    diferențele ş/ș. Sediile secundare poartă numele firmei-mamă, deci
+    „EVI MUSIC S.R.L." și „EVI  MUSIC SRL" sunt aceeași firmă."""
+    return re.sub(r"\W", "", (denumire or "").upper().translate(_CEDILLA))

@@ -113,6 +113,9 @@ jobs:
           path: data/firme.db
           key: firme-db-${{ github.run_id }}
 
+      - name: Verificare telefoane (numere false și comune)
+        run: python run.py verifica-telefoane
+
       - name: Statistici
         run: python run.py stats
 

@@ -62,8 +62,9 @@ cerere); rulările următoare interoghează doar firmele nou apărute.
 **C. Linux / Mac / server** — `bash scripts/run_daily.sh` (sau programat cu cron,
 vezi `scripts/crontab.example`).
 
-Rezultatul: `Firme-noi-2026.xlsx` (toate firmele) și
-`Firme-noi-2026-cu-telefon.xlsx` (doar cele cu telefon valid).
+Rezultatul: `Firme-noi-2026.xlsx` (toate firmele noi active) și
+`Firme-noi-2026-cu-telefon.xlsx` (doar cele cu telefon propriu valid — vezi
+„Verificarea telefoanelor").
 
 ---
 
@@ -183,23 +184,50 @@ tabel `runs` cu jurnalul fiecărei rulări.
 
 ## Tipuri de entitate
 
-ANAF alocă CUI și sediilor secundare ale firmelor existente, persoanelor fizice
-autorizate (PFA/II/IF), profesiilor liberale și asociațiilor. Fiecare
-înregistrare primește în export coloana **„Tip entitate"** (Firmă · Sediu
-secundar · PFA / II / IF · Profesie liberală / cabinet · Asociație / ONG /
-altele) și **„Activă"** (Nu pentru radiate/dizolvate/inactive).
+ANAF alocă CUI și sediilor secundare / punctelor de lucru ale firmelor
+existente, persoanelor fizice autorizate (PFA/II/IF), profesiilor liberale și
+asociațiilor. Fiecare înregistrare primește în export coloana **„Tip
+entitate"** (Firmă · Sediu secundar / punct de lucru · PFA / II / IF ·
+Profesie liberală / cabinet · Asociație / ONG / altele) și **„Activă"** (Nu
+pentru radiate/dizolvate/inactive).
 
-Exemplu 2026 (1 ian – 25 sept): 243.152 de înregistrări noi, dintre care
-~99.000 firme noi (93.030 active), iar 50.418 au telefon valid la ANAF.
-Fișierele principale (`Firme-noi-AN*.xlsx`) conțin doar firmele noi active;
-`Toate-inregistrarile-AN.csv.gz` le conține pe toate.
+O firmă nouă are număr de Registrul Comerțului (J...) chiar din ziua
+înmatriculării. Un CUI cu denumire de firmă, dar **fără număr J**, este al unui
+punct de lucru înregistrat fiscal: poartă numele firmei-mamă și de obicei
+același telefon (ex. „OASIS CONFORT S.R.L." 55623502 = punct de lucru al firmei
+54213946). În ianuarie–martie 2026 au fost ~30.000 de astfel de înregistrări;
+ele nu sunt numărate ca firme noi.
+
+Firme noi active (cu număr J): **2024: 69.681 · 2025: 88.380 · 2026 (până la 25
+sept): 54.939**. Fișierele principale (`Firme-noi-AN*.xlsx`) conțin doar
+firmele noi active; `Toate-inregistrarile-AN.csv.gz` le conține pe toate.
+
+## Verificarea telefoanelor
+
+`python run.py verifica-telefoane` (rulează automat înainte de export):
+
+- **numere false** — ultimele 7 cifre identice (0722222222), secvențe
+  (0712345678), 6+ zerouri (0780000001), prefixe invalide (+00000000). Nu se
+  șterg, se marchează „Suspect";
+- **numere comune** — același număr la **3+ firme diferite** este aproape
+  întotdeauna al contabilului / firmei de consultanță care le-a înființat (ex.
+  un singur număr apare la 2.164 de firme). Firma și propriile puncte de lucru
+  (aceeași denumire) contează o singură dată. Marcate „Comun"; foaia
+  **„Telefoane comune"** din Excel le listează;
+- același număr la **2 firme** rămâne valid (de regulă același antreprenor).
+
+Coloana **„Calitate telefon"**: OK · Străin · Comun · Suspect. Fișierul
+`*-cu-telefon.xlsx` conține doar OK și Străin (`--with-phone --fara-suspecte
+--fara-comune`). Firme noi active cu telefon propriu valid: 2024: 46.671 (67%)
+· 2025: 59.138 (67%) · 2026: 36.335 (66%).
 
 ## Filtre disponibile (comenzile `filter` și `export`)
 
 `--judet` · `--localitate` · `--caen` (cod exact) · `--caen-prefix` (ex. `62` =
 tot IT-ul) · `--sectiune` (A–U, ex. `F` = construcții) · `--denumire` ·
 `--with-phone` / `--without-phone` · `--with-email` · `--platitor-tva` ·
-`--active` (exclude radiate/inactive) · `--doar-firme` (doar firme noi active) · `--fara-suspecte` · `--min-salariati N` · `--min-cifra X` ·
+`--active` (exclude radiate/inactive) · `--doar-firme` (doar firme noi active) · `--fara-suspecte` ·
+`--fara-comune` (fără numere folosite de 3+ firme) · `--max-utilizari N` · `--min-salariati N` · `--min-cifra X` ·
 `--dupa YYYY-MM-DD` / `--inainte YYYY-MM-DD` · `--order-by` · `--desc` · `--limit`
 
 Secțiunile CAEN utile: **F** construcții, **G** comerț, **J** IT & comunicații,

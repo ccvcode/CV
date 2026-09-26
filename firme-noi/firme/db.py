@@ -19,7 +19,8 @@ from .models import FLAG_FIELDS, OPTIONAL_BOOL_FIELDS, Company
 from .util import now_iso
 
 # Tipurile coloanelor (restul sunt TEXT).
-_INT_COLS = {"cui", "numar_salariati", "an_bilant"} | FLAG_FIELDS | OPTIONAL_BOOL_FIELDS
+_INT_COLS = ({"cui", "numar_salariati", "an_bilant", "telefon_utilizari"}
+             | FLAG_FIELDS | OPTIONAL_BOOL_FIELDS)
 _REAL_COLS = {
     "cifra_afaceri", "profit_net", "pierdere_neta",
     "active_total", "datorii_total", "capital_total",
@@ -226,6 +227,58 @@ class Database:
     def iter_needing_bilant(self, limit: Optional[int] = None) -> Iterator[Company]:
         yield from self._iter("bilant_verificat = 0", "data_colectare", limit)
 
+    def recheck_phones(self) -> dict:
+        """Revalidează toate telefoanele și numără câte firme folosesc fiecare număr.
+
+        - normalizează din nou numărul și recalculează `telefon_suspect`
+          (numerele invalide rămân vizibile, dar marcate suspecte);
+        - `telefon_utilizari` = câte firme DIFERITE (după denumire) au același
+          număr. Sediile secundare au CUI propriu, dar poartă numele firmei-mamă
+          și același telefon, deci nu se numără separat. Un număr folosit de
+          3+ firme diferite e de regulă al unui contabil sau al unei firme de
+          consultanță care le-a înființat, nu al firmei.
+        """
+        from .util import clean_phone, firma_key, is_suspect_phone
+
+        rows = self.conn.execute(
+            "SELECT cui, telefon, denumire FROM companies"
+            " WHERE telefon IS NOT NULL AND telefon <> '' ORDER BY cui DESC"
+        ).fetchall()
+        checked = []
+        firme: dict[str, dict[str, str]] = {}   # telefon -> {cheie denumire: denumire}
+        for cui, tel, name in rows:
+            norm = clean_phone(tel)
+            if norm is None:
+                norm, suspect = tel, 1
+            else:
+                suspect = 1 if is_suspect_phone(norm) else 0
+            checked.append((norm, suspect, cui))
+            firme.setdefault(norm, {}).setdefault(firma_key(name) or str(cui), name or "")
+        self.conn.execute(
+            "UPDATE companies SET telefon_utilizari = NULL"
+            " WHERE telefon IS NULL OR telefon = ''")
+        self.conn.executemany(
+            "UPDATE companies SET telefon = ?, telefon_suspect = ?, telefon_utilizari = ?"
+            " WHERE cui = ?",
+            ((tel, suspect, len(firme[tel]), cui) for tel, suspect, cui in checked),
+        )
+        self.conn.commit()
+
+        one = lambda sql: self.conn.execute(sql).fetchone()[0]  # noqa: E731
+        top = sorted(((t, f) for t, f in firme.items() if len(f) >= 3),
+                     key=lambda kv: -len(kv[1]))[:15]
+        return {
+            "cu_telefon": len(rows),
+            "suspecte": one("SELECT COUNT(*) FROM companies WHERE telefon_suspect = 1"),
+            "straine": one("SELECT COUNT(*) FROM companies WHERE telefon LIKE '+%'"),
+            "unice": one("SELECT COUNT(*) FROM companies WHERE telefon_utilizari = 1"),
+            "doua": one("SELECT COUNT(*) FROM companies WHERE telefon_utilizari = 2"),
+            "comune_inregistrari": one("SELECT COUNT(*) FROM companies WHERE telefon_utilizari >= 3"),
+            "numere_comune": one(
+                "SELECT COUNT(DISTINCT telefon) FROM companies WHERE telefon_utilizari >= 3"),
+            "top": [(t, len(f), list(f.values())[:3]) for t, f in top],
+        }
+
     def cui_range(self, sursa: str) -> tuple[Optional[int], Optional[int]]:
         """CUI minim și maxim al firmelor venite dintr-o sursă (sau None)."""
         row = self.conn.execute(
@@ -262,6 +315,7 @@ class Database:
         doar_active: bool = False,
         fara_suspecte: bool = False,
         doar_verificate: bool = False,
+        max_utilizari: Optional[int] = None,
         min_salariati: Optional[int] = None,
         min_cifra_afaceri: Optional[float] = None,
         inregistrata_dupa: Optional[str] = None,
@@ -309,6 +363,9 @@ class Database:
             clauses.append("(telefon_suspect IS NULL OR telefon_suspect = 0)")
         if doar_verificate:
             clauses.append("anaf_verificat = 1")
+        if max_utilizari is not None:
+            clauses.append("(telefon_utilizari IS NULL OR telefon_utilizari <= ?)")
+            params.append(int(max_utilizari))
         if min_salariati is not None:
             clauses.append("numar_salariati >= ?")
             params.append(int(min_salariati))

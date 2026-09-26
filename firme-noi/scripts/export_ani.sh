@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Exportă rezultatele pe ani, în out/<AN>/:
 #   Firme-noi-<AN>.xlsx               – firme noi active
-#   Firme-noi-<AN>-cu-telefon.xlsx    – firme noi active cu telefon valid
+#   Firme-noi-<AN>-cu-telefon.xlsx    – firme noi active cu telefon propriu valid
+#                                       (fără numere false și fără numere comune)
 #   Toate-inregistrarile-<AN>.csv     – toate înregistrările (inclusiv sedii secundare, PFA)
 #   STATISTICI.txt
 #
@@ -31,7 +32,7 @@ for an in $ani; do
   fi
   python run.py export --format xlsx --doar-firme "${interval[@]}" --out "$d/Firme-noi-$an.xlsx"
   python run.py export --format xlsx --doar-firme "${interval[@]}" --with-phone --fara-suspecte \
-    --out "$d/Firme-noi-$an-cu-telefon.xlsx"
+    --fara-comune --out "$d/Firme-noi-$an-cu-telefon.xlsx"
   python run.py stats --an "$an" > "$d/STATISTICI.txt"
   head -7 "$d/STATISTICI.txt"
 done

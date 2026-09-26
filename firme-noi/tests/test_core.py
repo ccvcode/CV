@@ -29,12 +29,12 @@ class TestPhone(unittest.TestCase):
         self.assertIsNone(normalize_phone(""))
         self.assertIsNone(normalize_phone(None))
         self.assertIsNone(normalize_phone("12345"))
-        self.assertIsNone(normalize_phone("+37360696333"))  # Moldova (+373), nu RO
+        self.assertIsNone(normalize_phone("+37360123987"))  # Moldova (+373), nu RO
         self.assertIsNone(normalize_phone("072812"))         # prea scurt
 
     def test_normalize_recovers_country_code(self):
-        # „40728118832" (prefix 40 fără +) e recuperat ca număr național RO.
-        self.assertEqual(normalize_phone("40728118832"), "0728118832")
+        # „40728118123" (prefix 40 fără +) e recuperat ca număr național RO.
+        self.assertEqual(normalize_phone("40728118123"), "0728118123")
 
     def test_fake_number_passes_format_check(self):
         # ATENȚIE: un număr fals dar cu format corect (ex. 0770000000) trece de
@@ -194,11 +194,11 @@ class TestReviewFixes(unittest.TestCase):
     def test_multiple_numbers_in_one_field(self):
         from firme.util import clean_phone
         self.assertEqual(clean_phone("0721 234 567, 0231 123 456"), "0721234567")
-        self.assertEqual(clean_phone("tel: 0751-365991 / fax 0231..."), "0751365991")
+        self.assertEqual(clean_phone("tel: 0751-365123 / fax 0231..."), "0751365123")
 
     def test_foreign_numbers_are_kept(self):
         from firme.util import clean_phone
-        self.assertEqual(clean_phone("+37360696333"), "+37360696333")
+        self.assertEqual(clean_phone("+37360123987"), "+37360123987")
         self.assertEqual(clean_phone("0040 721 234 567"), "0721234567")
         self.assertIsNone(clean_phone("-"))
 
@@ -206,13 +206,13 @@ class TestReviewFixes(unittest.TestCase):
         from firme.util import is_suspect_phone
         self.assertTrue(is_suspect_phone("0770000000"))
         self.assertTrue(is_suspect_phone("0712345678"))
-        self.assertFalse(is_suspect_phone("0748081536"))
+        self.assertFalse(is_suspect_phone("0744123987"))
 
     def test_anaf_phone_with_two_numbers(self):
         entry = {"date_generale": {"cui": 9, "denumire": "X SRL",
-                                   "telefon": "0748081536; 0232111222"}}
+                                   "telefon": "0744123987; 0232111222"}}
         c = AnafClient._parse_entry(entry)
-        self.assertEqual(c.telefon, "0748081536")
+        self.assertEqual(c.telefon, "0744123987")
         self.assertFalse(c.telefon_suspect)
 
     # --- baza de date ------------------------------------------------------
@@ -301,12 +301,64 @@ class TestOnrcParsing(unittest.TestCase):
             list(self._source(dupa="2026-01-01").parse_lines(sample))
 
 
+class TestPhoneQuality(unittest.TestCase):
+    """Exemple reale găsite în datele 2024–2026."""
+
+    def test_fake_numbers(self):
+        from firme.util import clean_phone, is_suspect_phone
+        self.assertIsNone(clean_phone("+00000000"))          # trecea drept „străin"
+        self.assertIsNone(clean_phone("+0123456789"))        # prefix de țară invalid
+        for fake in ("0722222222", "0700000000", "0780000001", "0756000000", "+393474567890"):
+            self.assertTrue(is_suspect_phone(fake), fake)
+        for real in ("0744123987", "0740500001", "0733333373", "+37360123987"):
+            self.assertFalse(is_suspect_phone(real), real)   # inclusiv numere „de aur"
+
+    def test_shared_numbers_are_counted_and_filtered(self):
+        from firme.classify import calitate_telefon
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        db = Database(tmp.name)
+        try:
+            for cui in (1, 2, 3):                            # același număr: consultant
+                db.insert_new(Company(cui=cui, denumire=f"F{cui} SRL", telefon="0721555333"))
+            db.insert_new(Company(cui=4, denumire="PROPRIU SRL", telefon="0744123987"))
+            db.insert_new(Company(cui=5, denumire="FALS SRL", telefon="+00000000"))
+            r = db.recheck_phones()
+            self.assertEqual(r["comune_inregistrari"], 3)
+            self.assertEqual(r["numere_comune"], 1)
+            self.assertEqual(db.get(1).telefon_utilizari, 3)
+            self.assertEqual(calitate_telefon(db.get(1)), "Comun")
+            self.assertEqual(calitate_telefon(db.get(4)), "OK")
+            self.assertEqual(calitate_telefon(db.get(5)), "Suspect")
+            clean = db.query(with_phone=True, fara_suspecte=True, max_utilizari=2)
+            self.assertEqual([c.cui for c in clean], [4])
+        finally:
+            db.close()
+            os.unlink(tmp.name)
+
+    def test_secondary_offices_are_not_shared_numbers(self):
+        # 50254358 și punctul de lucru 50319830 au același nume și telefon.
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        db = Database(tmp.name)
+        try:
+            db.insert_new(Company(cui=50254358, denumire="EVI MUSIC S.R.L.", telefon="0755987321"))
+            db.insert_new(Company(cui=50319830, denumire="EVI MUSIC S.R.L.", telefon="0755987321"))
+            db.insert_new(Company(cui=50319831, denumire="EVI  MUSIC SRL", telefon="0755987321"))
+            db.insert_new(Company(cui=7, denumire="ALTA FIRMA SRL", telefon="0755987321"))
+            r = db.recheck_phones()
+            self.assertEqual(db.get(50254358).telefon_utilizari, 2)
+            self.assertEqual(r["numere_comune"], 0)
+        finally:
+            db.close()
+            os.unlink(tmp.name)
+
+
 class TestClassify(unittest.TestCase):
     """Exemple reale din colectarea 2026."""
 
-    def t(self, denumire, forma="", stare="INREGISTRAT din data 01.03.2026"):
+    def t(self, denumire, forma="", stare="INREGISTRAT din data 01.03.2026", j="J2026012345000"):
         from firme.classify import este_activa, tip_entitate
-        c = Company(cui=1, denumire=denumire, forma_juridica=forma, stare_inregistrare=stare)
+        c = Company(cui=1, denumire=denumire, forma_juridica=forma, stare_inregistrare=stare,
+                    nr_reg_com=j)
         return tip_entitate(c), este_activa(c)
 
     def test_types(self):
@@ -325,6 +377,17 @@ class TestClassify(unittest.TestCase):
         self.assertEqual(self.t("ASOCIATIA BUCOVINA CONNECT", "ALTE FORME JURIDICE")[0], k.ASOCIATIE)
         self.assertEqual(self.t("AVOCAT STAGIAR DAN SIMONA MIRELA")[0], k.PROFESIE)
         self.assertEqual(self.t("TINCU F. IOANA-FLORENTINA - AGENT DE ASIGURARE")[0], k.PROFESIE)
+
+    def test_fara_numar_j_e_punct_de_lucru(self):
+        # 55623502 = punct de lucru al firmei 54213946 (J2026015992000).
+        from firme import classify as k
+        self.assertEqual(self.t("OASIS CONFORT S.R.L.", j=None)[0], k.SEDIU_SECUNDAR)
+        self.assertEqual(self.t("PREMIUM PARFUM SRL", "SOCIETATE COMERCIALĂ CU RĂSPUNDERE "
+                                "LIMITATĂ", stare="INREGISTRAT din data 19.01.2026", j="")[0],
+                         k.SEDIU_SECUNDAR)
+        self.assertEqual(self.t("OASIS CONFORT S.R.L.")[0], k.FIRMA)
+        self.assertEqual(self.t("POPESCU ION PFA", j=None)[0], k.PFA)
+        self.assertEqual(self.t("ASOCIATIA X", "ALTE FORME JURIDICE", j=None)[0], k.ASOCIATIE)
 
     def test_radiata_nu_e_activa(self):
         tip, activa = self.t("X SRL", "SOCIETATE COMERCIALĂ CU RĂSPUNDERE LIMITATĂ",

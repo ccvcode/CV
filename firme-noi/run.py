@@ -23,7 +23,9 @@ import logging
 import sys
 from pathlib import Path
 
-from firme.classify import este_activa, este_firma_noua_activa, tip_entitate
+from firme.classify import (
+    calitate_telefon, este_activa, este_firma_noua_activa, tip_entitate,
+)
 from firme.config import load_config
 from firme.db import Database
 from firme.enrich import AnafClient
@@ -36,7 +38,8 @@ from firme.webpage import render_artifact, render_standalone
 EXPORT_COLUMNS = [
     "cui", "denumire", "tip_entitate", "activa", "nr_reg_com", "forma_juridica",
     "cod_caen", "caen_descriere", "caen_sectiune", "caen_sectiune_nume",
-    "telefon", "telefon_sursa", "telefon_suspect", "email", "website",
+    "telefon", "telefon_calitate", "telefon_utilizari", "telefon_sursa", "telefon_suspect",
+    "email", "website",
     "judet", "localitate", "strada", "numar", "cod_postal", "adresa",
     "stare_inregistrare", "data_inregistrare", "inactiv",
     "platitor_tva", "tva_la_incasare", "split_tva", "ro_e_factura",
@@ -73,6 +76,10 @@ def add_filter_args(sp: argparse.ArgumentParser) -> None:
                     help="exclude telefoanele de formă (ex. 0770000000)")
     sp.add_argument("--doar-verificate", action="store_true",
                     help="doar firmele confirmate de ANAF")
+    sp.add_argument("--fara-comune", action="store_true",
+                    help="exclude telefoanele folosite de 3+ firme (contabili/consultanți)")
+    sp.add_argument("--max-utilizari", type=int,
+                    help="exclude telefoanele folosite de mai mult de N firme diferite")
     sp.add_argument("--doar-firme", action="store_true",
                     help="doar firme noi active (fără sedii secundare, PFA, profesii liberale, radiate)")
     sp.add_argument("--min-salariati", type=int)
@@ -99,6 +106,7 @@ def filters_from_args(args) -> dict:
         doar_active=args.active,
         fara_suspecte=args.fara_suspecte,
         doar_verificate=args.doar_verificate,
+        max_utilizari=args.max_utilizari or (2 if args.fara_comune else None),
         min_salariati=args.min_salariati,
         min_cifra_afaceri=args.min_cifra,
         inregistrata_dupa=args.dupa,
@@ -123,7 +131,28 @@ def export_row(c) -> dict:
     row = c.to_row()
     row["tip_entitate"] = tip_entitate(c)
     row["activa"] = int(este_activa(c))
+    row["telefon_calitate"] = calitate_telefon(c)
     return row
+
+
+def cmd_verifica_telefoane(args, cfg, db):
+    """Revalidează telefoanele și raportează numerele false și cele comune."""
+    r = db.recheck_phones()
+    n = r["cu_telefon"] or 1
+    pct = lambda x: f"{x} ({100 * x / n:.1f}%)"  # noqa: E731
+    print("Verificare telefoane")
+    print("=" * 40)
+    print(f"  Înregistrări cu telefon:            {r['cu_telefon']}")
+    print(f"  Număr propriu (o singură firmă):    {pct(r['unice'])}")
+    print(f"  Același număr la 2 firme:           {pct(r['doua'])}  (ex. PFA + SRL al aceleiași persoane)")
+    print(f"  Număr comun (3+ firme diferite):    {pct(r['comune_inregistrari'])}"
+          f"  – {r['numere_comune']} numere distincte")
+    print(f"  Suspecte (ex. 0722222222):          {pct(r['suspecte'])}")
+    print(f"  Străine:                            {pct(r['straine'])}")
+    if r["top"]:
+        print("\n  Cele mai folosite numere (contabili / firme de consultanță):")
+        for tel, cnt, ex in r["top"]:
+            print(f"    {tel}: {cnt} firme  – ex. {', '.join(ex)}")
 
 
 # --------------------------------------------------------------------------- #
@@ -267,7 +296,8 @@ def print_year_summary(an: int, db) -> None:
     rows = db.query(inregistrata_dupa=f"{an}-01-01", inregistrata_inainte=f"{an}-12-31")
     tipuri = Counter(tip_entitate(c) for c in rows)
     firme = [c for c in rows if este_firma_noua_activa(c)]
-    cu_tel = [c for c in firme if c.telefon and not c.telefon_suspect]
+    calit = Counter(calitate_telefon(c) for c in firme if c.telefon)
+    cu_tel = [c for c in firme if calitate_telefon(c) in ("OK", "Străin")]
     date = sorted(c.data_inregistrare for c in rows if c.data_inregistrare)
     print(f"Înregistrări noi {an}")
     print("=" * 40)
@@ -276,7 +306,9 @@ def print_year_summary(an: int, db) -> None:
         print(f"  Interval:                        {date[0]} – {date[-1]}")
     print(f"  Firme noi active:                {len(firme)}")
     pct = round(100 * len(cu_tel) / len(firme)) if firme else 0
-    print(f"  Firme noi active cu telefon:     {len(cu_tel)} ({pct}%)")
+    print(f"  Firme noi active cu telefon propriu valid: {len(cu_tel)} ({pct}%)")
+    print(f"    telefon comun (contabil/consultant, 3+ firme): {calit.get('Comun', 0)}")
+    print(f"    telefon suspect (ex. 0722222222):             {calit.get('Suspect', 0)}")
     print("\n  Pe tip de entitate:")
     for name, n in tipuri.most_common():
         print(f"    {name}: {n}")
@@ -310,13 +342,13 @@ def cmd_stats(args, cfg, db):
     firme_tel = 0
     for c in db.iter_all():
         tipuri[tip_entitate(c)] += 1
-        if este_firma_noua_activa(c) and c.telefon and not c.telefon_suspect:
+        if este_firma_noua_activa(c) and calitate_telefon(c) in ("OK", "Străin"):
             firme_tel += 1
     if tipuri:
         print("\n  Pe tip de entitate:")
         for name, n in tipuri.most_common():
             print(f"    {name}: {n}")
-        print(f"  Firme noi active cu telefon valid: {firme_tel}")
+        print(f"  Firme noi active cu telefon propriu valid: {firme_tel}")
     if s["pe_sectiune"]:
         print("\n  Pe secțiuni CAEN:")
         for sec, n in list(s["pe_sectiune"].items())[:12]:
@@ -429,6 +461,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("verify", help="confruntă datele cu ANAF real")
     sp.add_argument("--limit", type=int)
     sp.set_defaults(func=cmd_verify)
+
+    sp = sub.add_parser("verifica-telefoane",
+                        help="revalidează telefoanele; marchează numerele false și cele comune")
+    sp.set_defaults(func=cmd_verifica_telefoane)
 
     sp = sub.add_parser("stats", help="statistici detaliate")
     sp.add_argument("--an", type=int, help="doar înregistrările noi din acest an")

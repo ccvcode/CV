@@ -72,6 +72,7 @@ class Company:
     telefon: Optional[str] = None
     telefon_sursa: Optional[str] = None
     telefon_suspect: Optional[bool] = None      # ex. 0770000000 — de verificat
+    telefon_utilizari: Optional[int] = None     # câte firme diferite au același număr
     fax: Optional[str] = None
     email: Optional[str] = None
     website: Optional[str] = None
