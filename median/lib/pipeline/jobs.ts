@@ -93,4 +93,6 @@ export function releaseAllRunning() {
 /** Curățenie: joburile terminate mai vechi de 3 zile. */
 export function pruneJobs() {
   db().prepare("DELETE FROM jobs WHERE status = 'done' AND updated_at < ?").run(Date.now() - 3 * 86400_000);
+  // Politica de confidențialitate: adresele de e-mail din semnalări se șterg după 12 luni.
+  db().prepare("UPDATE reports SET email = NULL WHERE email IS NOT NULL AND created_at < ?").run(Date.now() - 365 * 86400_000);
 }

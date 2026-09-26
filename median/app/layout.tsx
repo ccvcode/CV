@@ -3,8 +3,10 @@ import Script from "next/script";
 import "./globals.css";
 import { Footer } from "@/components/footer";
 import { Masthead, themeScript } from "@/components/masthead";
+import { weatherLabel } from "@/components/weather";
 import { config } from "@/lib/core/config";
-import { aiMode, outletsList, siteStatus } from "@/lib/data/queries";
+import { aiMode, siteStatus } from "@/lib/data/queries";
+import { formatTime } from "@/lib/core/utils";
 import { getRates, getWeather } from "@/lib/data/widgets";
 
 export const metadata: Metadata = {
@@ -30,23 +32,10 @@ export const viewport: Viewport = {
 
 export const dynamic = "force-dynamic";
 
-const WEATHER: [number, string][] = [
-  [0, "senin"],
-  [2, "parțial noros"],
-  [3, "înnorat"],
-  [48, "ceață"],
-  [57, "burniță"],
-  [67, "ploaie"],
-  [77, "ninsoare"],
-  [82, "averse"],
-  [86, "ninsoare"],
-  [99, "furtună"],
-];
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const [rates, weather] = await Promise.all([getRates().catch(() => null), getWeather().catch(() => null)]);
   const status = siteStatus();
-  const outlets = outletsList().map((o) => o.name);
   const buc = weather?.[0];
   const eur = rates?.rates.find((r) => r.code === "EUR");
   const usd = rates?.rates.find((r) => r.code === "USD");
@@ -54,7 +43,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <>
       {buc && (
         <span>
-          București <b className="mono font-medium text-ink">{buc.temp}°</b> · {WEATHER.find(([c]) => buc.code <= c)?.[1]}
+          București <b className="mono font-medium text-ink">{buc.temp}°</b> · {weatherLabel(buc.code)}
         </span>
       )}
       {eur && (
@@ -67,9 +56,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           USD <b className="mono font-medium text-ink">{usd.value.toFixed(4).replace(".", ",")}</b>
         </span>
       )}
-      <span className="hidden lg:inline">
-        {status.outlets} publicații · {status.sourcesOk}/{status.sourcesTotal} fluxuri active
-      </span>
+      {status.lastFetch > 0 && (
+        <span className="hidden lg:inline" suppressHydrationWarning>
+          Actualizat la <b className="mono font-medium text-ink">{formatTime(status.lastFetch)}</b>
+        </span>
+      )}
     </>
   );
   return (
@@ -91,7 +82,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           </div>
         )}
         <div id="continut">{children}</div>
-        <Footer outlets={outlets} ai={aiMode()} />
+        <Footer ai={aiMode()} />
       </body>
     </html>
   );

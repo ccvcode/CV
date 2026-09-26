@@ -18,7 +18,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: site, changeFrequency: "always", priority: 1 },
     { url: `${site}/pe-scurt`, changeFrequency: "always", priority: 0.8 },
     ...CATEGORIES.map((c) => ({ url: `${site}/categorie/${c.slug}`, changeFrequency: "hourly" as const, priority: 0.7 })),
-    ...["despre", "politica-editoriala", "politica-ai", "corecturi", "surse", "contact"].map((p) => ({ url: `${site}/${p}`, changeFrequency: "monthly" as const, priority: 0.3 })),
+    ...["despre", "politica-editoriala", "politica-ai", "corecturi", "surse", "contact", "termeni", "confidentialitate", "cookies"].map((p) => ({ url: `${site}/${p}`, changeFrequency: "monthly" as const, priority: 0.3 })),
     ...rows.map((r) => ({ url: `${site}${storyHref(r)}`, lastModified: new Date(r.updated_at), priority: 0.6 })),
   ];
 }

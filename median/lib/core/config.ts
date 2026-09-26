@@ -83,6 +83,9 @@ export const config = {
   sessionSecret: str("MEDIAN_SECRET", "schimba-acest-secret-in-productie"),
   contactEmail: str("MEDIAN_CONTACT_EMAIL", "redactia@median.ro"),
   company: str("MEDIAN_COMPANY", ""),
+  /** Datele operatorului (GDPR art. 13): sediu și cod fiscal; apar în Politica de confidențialitate. */
+  companyAddress: str("MEDIAN_COMPANY_ADDRESS", ""),
+  companyId: str("MEDIAN_COMPANY_ID", ""),
 };
 
 export const paths = {

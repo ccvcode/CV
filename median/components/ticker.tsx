@@ -4,8 +4,22 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { formatTime } from "@/lib/core/utils";
 
-/** Banda „ULTIMA ORĂ”: o știre pe rând, schimbată la 6 secunde (se oprește la hover). */
-export function Ticker({ items }: { items: { href: string; title: string; ts: number }[] }) {
+type Item = { href: string; title: string; ts: number };
+
+function Label() {
+  return (
+    <Link href="/pe-scurt" className="kicker flex shrink-0 items-center gap-2 text-accent hover:underline">
+      <span aria-hidden className="live-dot" />
+      Ultima oră
+    </Link>
+  );
+}
+
+/**
+ * „Ultima oră”: pe desktop, cele mai noi trei subiecte importante, unul lângă altul; pe telefon,
+ * câte unul, schimbat la 6 secunde (se oprește la atingere sau hover).
+ */
+export function Ticker({ items }: { items: Item[] }) {
   const [i, setI] = useState(0);
   const [paused, setPaused] = useState(false);
   useEffect(() => {
@@ -16,20 +30,33 @@ export function Ticker({ items }: { items: { href: string; title: string; ts: nu
   if (!items.length) return null;
   const it = items[i % items.length];
   return (
-    <div className="bg-band text-on-band" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
-      <div className="mx-auto flex h-9 max-w-[1320px] items-stretch px-4 sm:px-8">
-        <Link href="/pe-scurt" className="kicker -ml-4 flex shrink-0 items-center bg-accent px-3 text-white sm:-ml-8 sm:px-4">
-          Ultima oră
-        </Link>
-        <div className="relative min-w-0 flex-1 overflow-hidden" aria-live="polite">
-          <Link key={it.href} href={it.href} className="tick-in ui flex h-9 items-center gap-3 truncate pl-4 text-[14px] hover:underline">
-            <span className="mono shrink-0 text-[12px] opacity-70">{formatTime(it.ts)}</span>
-            <span className="truncate font-medium">{it.title}</span>
+    <div className="mx-auto max-w-[1320px] px-4 sm:px-8">
+      <div className="ui flex items-start gap-6 border-b border-rule py-3">
+        <div className="pt-[3px]">
+          <Label />
+        </div>
+        {/* Desktop: trei subiecte */}
+        <ol className="hidden min-w-0 flex-1 md:grid md:grid-cols-3">
+          {items.slice(0, 3).map((x, k) => (
+            <li key={x.href} className={k > 0 ? "min-w-0 border-l border-rule pl-5" : "min-w-0 pr-5"}>
+              <Link href={x.href} className="group flex gap-2.5 text-[14px] leading-snug">
+                <time className="mono shrink-0 pt-px text-[12px] text-ink-3" suppressHydrationWarning>
+                  {formatTime(x.ts)}
+                </time>
+                <span className="line-clamp-2 font-semibold group-hover:underline">{x.title}</span>
+              </Link>
+            </li>
+          ))}
+        </ol>
+        {/* Telefon: unul pe rând */}
+        <div className="min-w-0 flex-1 md:hidden" aria-live="polite" onTouchStart={() => setPaused(true)}>
+          <Link key={it.href} href={it.href} className="tick-in flex gap-2.5 text-[14px] leading-snug">
+            <time className="mono shrink-0 pt-px text-[12px] text-ink-3" suppressHydrationWarning>
+              {formatTime(it.ts)}
+            </time>
+            <span className="line-clamp-2 font-semibold">{it.title}</span>
           </Link>
         </div>
-        <span className="mono hidden shrink-0 items-center text-[11px] opacity-60 sm:flex">
-          {i + 1}/{items.length}
-        </span>
       </div>
     </div>
   );

@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { Figure } from "@/components/figure";
 import { LiveUpdater } from "@/components/live-updater";
+import { Markets } from "@/components/markets";
+import { Weather } from "@/components/weather";
 import { SectionHead } from "@/components/section";
 import { Kicker, leadClass, listImage, Meta, StoryBlock, StoryLink, StoryRow, sourcesLabel } from "@/components/story";
 import { Clock } from "@/components/time";
 import { Ticker } from "@/components/ticker";
 import { REGION_MAP, REGIONS } from "@/lib/core/categories";
 import type { CategorySlug } from "@/lib/core/types";
-import { breakingStories, distinctStories, relatedStories, sharesName, latestStories, mostRead, siteStatus, topStories, type StoryCard } from "@/lib/data/queries";
+import { breakingStories, distinctStories, relatedStories, sharesName, latestStories, mostRead, topStories, type StoryCard } from "@/lib/data/queries";
 import { getRates, getWeather } from "@/lib/data/widgets";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +17,6 @@ export const dynamic = "force-dynamic";
 const withPhoto = (list: StoryCard[]) => list.filter((s) => listImage(s));
 
 export default async function Home() {
-  const status = siteStatus();
   const used = new Set<string>();
   const pool = topStories({ limit: 30, hours: 36 });
   if (!pool.length) return <EmptyState />;
@@ -47,7 +48,7 @@ export default async function Home() {
 
   // Secțiunile nu repetă știrile deja afișate; prima știre a secțiunii este una cu poză (dintre primele trei).
   const section = (category: CategorySlug, limit: number, hours = 72) => {
-    const list = topStories({ category, limit, hours, exclude: used });
+    const list = distinctStories(topStories({ category, limit: limit + 2, hours, exclude: used }), [lead]).slice(0, limit);
     const i = list.slice(0, 3).findIndex((s) => listImage(s));
     if (i > 0) list.unshift(...list.splice(i, 1));
     return list;
@@ -55,7 +56,7 @@ export default async function Home() {
   const intl = section("international", 11, 48);
   const politica = section("politica", 5);
   const national = section("national", 5);
-  const economie = section("economie", 4);
+  const economie = section("economie", 5);
   const sport = section("sport", 7);
   const tech = section("tech", 5);
   const sanatate = section("sanatate", 5);
@@ -220,42 +221,20 @@ export default async function Home() {
           </section>
         )}
 
-        {/* 6. Economie + piețe */}
-        {(economie.length > 0 || rates) && (
+        {/* 6. Economie + cursul BNR (bandă compactă) */}
+        {economie.length > 0 && (
           <section className="mt-16">
             <SectionHead title="Economie" href="/categorie/economie" />
+            {rates && <Markets rates={rates} />}
             <div className="grid gap-6 lg:grid-cols-12">
-              <div className="grid gap-6 sm:grid-cols-2 lg:col-span-9">
-                {economie[0] && <StoryBlock story={economie[0]} size="lg" ratio="3/2" dek className="sm:row-span-3" sizes="(max-width: 640px) 100vw, 480px" />}
-                <div className="sm:border-l sm:border-rule sm:pl-6">
-                  {economie.slice(1, 4).map((s) => (
-                    <StoryRow key={s.id} story={s} kicker={false} className="border-b border-rule py-3 first:pt-0 last:border-0" />
-                  ))}
-                </div>
-              </div>
-              {rates && (
-                <aside className="bg-surface p-5 lg:col-span-3" id="curs">
-                  <div className="kicker text-ink-2">Curs BNR</div>
-                  <div className="meta mt-0.5">{new Date(rates.date + "T12:00:00Z").toLocaleDateString("ro-RO", { day: "numeric", month: "long", timeZone: "Europe/Bucharest" })}</div>
-                  <table className="mono mt-3 w-full text-[14px]">
-                    <tbody>
-                      {rates.rates
-                        .filter((r) => ["EUR", "USD", "CHF", "GBP", "MDL", "XAU"].includes(r.code))
-                        .map((r) => {
-                          const diff = r.prev ? r.value - r.prev : 0;
-                          return (
-                            <tr key={r.code} className="border-b border-rule last:border-0">
-                              <td className="py-2 font-semibold">{r.code}</td>
-                              <td className="py-2 text-right">{r.value.toFixed(r.value > 100 ? 2 : 4).replace(".", ",")}</td>
-                              <td className="w-16 py-2 text-right text-[12px] text-ink-2">{diff === 0 ? "=" : `${diff > 0 ? "▲" : "▼"} ${Math.abs(diff).toFixed(r.value > 100 ? 2 : 4).replace(".", ",")}`}</td>
-                            </tr>
-                          );
-                        })}
-                    </tbody>
-                  </table>
-                  <p className="meta mt-3 text-[11px]">Sursa: Banca Națională a României</p>
-                </aside>
+              {economie[0] && (
+                <StoryBlock story={economie[0]} size="lg" ratio="3/2" dek className="lg:col-span-5" sizes="(max-width: 1024px) 100vw, 520px" />
               )}
+              <div className="grid content-start gap-x-6 sm:grid-cols-2 lg:col-span-7 lg:border-l lg:border-rule lg:pl-6">
+                {economie.slice(1, 5).map((s) => (
+                  <StoryRow key={s.id} story={s} kicker={false} thumb className="border-b border-rule py-3" />
+                ))}
+              </div>
             </div>
           </section>
         )}
@@ -323,28 +302,8 @@ export default async function Home() {
           </section>
         )}
 
-        {/* 11. Date utile */}
-        {weather && (
-          <section className="mt-16 border-t-2 border-rule-strong pt-3">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="section-head text-[24px]">Vremea</h2>
-              <span className="meta">Open-Meteo · actualizat la 15 minute</span>
-            </div>
-            <div className="mono mt-3 grid grid-cols-2 gap-x-6 text-[13px] sm:grid-cols-3 lg:grid-cols-4">
-              {weather.map((c) => (
-                <div key={c.city} className="flex justify-between gap-2 border-b border-rule py-2">
-                  <span className="ui truncate">{c.city}</span>
-                  <span>
-                    {c.temp}° <span className="text-ink-3">{c.daily[0]?.min}°/{c.daily[0]?.max}°</span>
-                  </span>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-        <p className="meta mt-10">
-          Median urmărește {status.outlets} publicații prin {status.sourcesTotal} fluxuri. <Link href="/surse" className="underline underline-offset-4">Vezi sursele</Link>.
-        </p>
+        {/* 11. Vremea, compact */}
+        {weather && <Weather cities={weather} />}
       </div>
     </main>
   );

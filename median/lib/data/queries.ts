@@ -273,11 +273,19 @@ export function mostRead(limit = 10): { stories: StoryCard[]; byViews: boolean }
   return { stories: cards(alt), byViews: false };
 }
 
+/**
+ * „Ultima oră”: subiecte NOI (primul raport în ultimele ore) preluate deja de mai multe redacții,
+ * fără nișe (monden, lifestyle, auto). Cele mai noi primele; dacă sunt prea puține, fereastra crește.
+ */
 export function breakingStories(limit = 8): StoryCard[] {
-  const rows = db()
-    .prepare(`${STORY_SELECT} WHERE ${visibility()} AND s.last_published_at > @since AND (s.breaking = 1 OR s.source_count >= 2) ORDER BY s.breaking DESC, s.first_published_at DESC LIMIT @lim`)
-    .all({ since: Date.now() - 6 * 3600_000, lim: limit }) as StoryRow[];
-  return cards(rows);
+  const q = db().prepare(
+    `${STORY_SELECT} WHERE ${visibility()} AND s.first_published_at > @since AND (s.breaking = 1 OR s.source_count >= @min)
+       AND s.category NOT IN ('monden', 'lifestyle', 'auto')
+     ORDER BY s.breaking DESC, s.first_published_at DESC LIMIT @lim`
+  );
+  let rows = q.all({ since: Date.now() - 6 * 3600_000, min: 3, lim: limit * 2 }) as StoryRow[];
+  if (rows.length < 3) rows = q.all({ since: Date.now() - 12 * 3600_000, min: 2, lim: limit * 2 }) as StoryRow[];
+  return cards(distinctStories(rows).slice(0, limit));
 }
 
 export function searchStories(q: string, limit = 40): StoryCard[] {
