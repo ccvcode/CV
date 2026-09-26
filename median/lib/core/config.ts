@@ -86,6 +86,10 @@ export const config = {
   /** Datele operatorului (GDPR art. 13): sediu și cod fiscal; apar în Politica de confidențialitate. */
   companyAddress: str("MEDIAN_COMPANY_ADDRESS", ""),
   companyId: str("MEDIAN_COMPANY_ID", ""),
+  /** Rezumatul de dimineață pe Telegram: tokenul botului, canalul (@nume sau ID) și linkul public. */
+  telegramToken: str("TELEGRAM_BOT_TOKEN", ""),
+  telegramChat: str("TELEGRAM_CHAT_ID", ""),
+  telegramUrl: str("TELEGRAM_CHANNEL_URL", ""),
 };
 
 export const paths = {

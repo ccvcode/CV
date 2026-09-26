@@ -128,9 +128,15 @@ export function Masthead({ utility, ticker }: { utility: React.ReactNode; ticker
           <Link href="/" className={cx(pathname === "/" ? "text-ink" : "text-ink-2 hover:text-ink")}>
             <span className={cx("border-b-2 pb-[3px]", pathname === "/" ? "border-accent" : "border-transparent")}>Prima pagină</span>
           </Link>
+          <Link href="/azi" className="text-accent-ink hover:text-ink">
+            <span className={cx("border-b-2 pb-[3px]", pathname === "/azi" ? "border-accent" : "border-transparent")}>Azi, în 3 minute</span>
+          </Link>
           {navLinks("")}
           <Link href="/pe-scurt" className={cx(pathname === "/pe-scurt" ? "text-ink" : "text-ink-2 hover:text-ink")}>
             <span className={cx("border-b-2 pb-[3px]", pathname === "/pe-scurt" ? "border-accent" : "border-transparent")}>Pe scurt</span>
+          </Link>
+          <Link href="/unghi-mort" className={cx(pathname === "/unghi-mort" ? "text-ink" : "text-ink-2 hover:text-ink")}>
+            <span className={cx("border-b-2 pb-[3px]", pathname === "/unghi-mort" ? "border-accent" : "border-transparent")}>Unghi mort</span>
           </Link>
         </nav>
         <div className="h-px bg-rule" />
@@ -171,7 +177,7 @@ export function Masthead({ utility, ticker }: { utility: React.ReactNode; ticker
             </button>
           </div>
           <ul className="mt-2">
-            {[{ href: "/", label: "Prima pagină" }, ...NAV, { href: "/pe-scurt", label: "Pe scurt" }, { href: "/salvate", label: "Salvate" }].map((n) => (
+            {[{ href: "/", label: "Prima pagină" }, { href: "/azi", label: "Azi, în 3 minute" }, ...NAV, { href: "/pe-scurt", label: "Pe scurt" }, { href: "/unghi-mort", label: "Unghi mort" }, { href: "/alerte", label: "Alerte" }, { href: "/notificari", label: "Notificări" }, { href: "/salvate", label: "Salvate" }].map((n) => (
               <li key={n.href} className="border-b border-rule">
                 <Link href={n.href} className="section-head block py-3 text-[32px]">
                   {n.label}

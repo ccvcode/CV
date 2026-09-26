@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   images: { unoptimized: true },
   // Module native / grele: rămân în node_modules, nu intră în bundle.
-  serverExternalPackages: ["better-sqlite3", "sharp", "undici", "linkedom", "@mozilla/readability", "satori", "@resvg/resvg-js", "probe-image-size"],
+  serverExternalPackages: ["better-sqlite3", "sharp", "undici", "linkedom", "@mozilla/readability", "satori", "@resvg/resvg-js", "probe-image-size", "web-push"],
   async headers() {
     return [
       {
@@ -15,6 +15,8 @@ const nextConfig: NextConfig = {
           { key: "X-Frame-Options", value: "SAMEORIGIN" },
         ],
       },
+      // Service worker-ul notificărilor: mereu versiunea curentă.
+      { source: "/sw.js", headers: [{ key: "Cache-Control", value: "no-cache" }] },
     ];
   },
 };

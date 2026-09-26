@@ -53,11 +53,26 @@ export default function Privacy() {
 
       <h3 className="ui mt-6 text-[17px] font-semibold">3. Date păstrate doar pe dispozitivul tău</h3>
       <p>
-        Tema aleasă (luminoasă sau întunecată) și articolele salvate pentru mai târziu sunt păstrate în memoria browserului tău (localStorage).
+        Tema aleasă (luminoasă sau întunecată), articolele salvate pentru mai târziu, momentul ultimei vizite și subiectele deschise (ca să
+        marcăm ce e nou) și preferințele de notificare sunt păstrate în memoria browserului tău (localStorage).
         Nu ajung niciodată la noi și le poți șterge oricând din setările browserului. Detalii în <Link href="/cookies">Politica privind cookie-urile</Link>.
       </p>
 
-      <h3 className="ui mt-6 text-[17px] font-semibold">4. Datele din știri</h3>
+      <h3 className="ui mt-6 text-[17px] font-semibold">4. Notificări (doar dacă le activezi)</h3>
+      <p>
+        Dacă activezi notificările pe pagina <Link href="/notificari">Notificări</Link>, browserul ne transmite o adresă tehnică de
+        notificare și două chei de criptare. Le păstrăm împreună cu subiectele alese (ex. rezumatul de dimineață, alertele) și cu numele
+        pe care alegi să le urmărești. Nu le putem lega de identitatea ta. Temeiul este consimțământul tău (art. 6 alin. 1 lit. a GDPR),
+        pe care îl retragi oricând cu „Dezabonează-mă de tot” sau din setările browserului; atunci ștergem abonamentul. Abonamentele pe
+        care browserul le declară expirate se șterg automat, iar evidența notificărilor trimise se șterge după 14 zile.
+      </p>
+      <p>
+        Mesajele ajung la tine prin serviciul de notificări al browserului (Google pentru Chrome și Edge pe Android, Mozilla pentru Firefox,
+        Apple pentru Safari, Microsoft pentru Edge pe Windows), criptate: aceste servicii nu pot citi conținutul, dar pot funcționa și în
+        afara Spațiului Economic European, în baza garanțiilor contractuale ale furnizorilor.
+      </p>
+
+      <h3 className="ui mt-6 text-[17px] font-semibold">5. Datele din știri</h3>
       <p>
         Știrile agregate pot conține numele unor persoane publice sau implicate în evenimente de interes public. Le prelucrăm în scop jurnalistic
         (art. 85 GDPR și art. 7 din Legea nr. 190/2018), cu trimitere la publicația care le-a relatat. Dacă o știre te privește și crezi că nu
@@ -67,7 +82,8 @@ export default function Privacy() {
       <h2>Cine mai are acces la date</h2>
       <p>
         Doar furnizorul de găzduire al serverului, care acționează ca persoană împuternicită, în baza unui contract, în Uniunea Europeană. Datele
-        pot fi comunicate autorităților doar dacă legea ne obligă. Nu transferăm date în afara Spațiului Economic European.
+        pot fi comunicate autorităților doar dacă legea ne obligă. Nu transferăm date în afara Spațiului Economic European, cu excepția
+        notificărilor, dacă le activezi (vezi mai sus).
       </p>
       <p>
         Butoanele de distribuire (WhatsApp, Facebook, X) sunt simple legături: nu încarcă nimic de la aceste rețele până nu apeși pe ele. După ce

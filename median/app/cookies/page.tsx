@@ -37,6 +37,18 @@ export default function Cookies() {
             <td className="py-2">până o ștergi</td>
           </tr>
           <tr className="border-b border-rule align-top">
+            <td className="mono py-2 pr-3 text-[13px]">median-vizita, median-vazute</td>
+            <td className="py-2 pr-3">localStorage</td>
+            <td className="py-2 pr-3">Momentul ultimei vizite și subiectele deschise, ca să marcăm știrile apărute între timp.</td>
+            <td className="py-2">până o ștergi</td>
+          </tr>
+          <tr className="border-b border-rule align-top">
+            <td className="mono py-2 pr-3 text-[13px]">median-notificari</td>
+            <td className="py-2 pr-3">localStorage</td>
+            <td className="py-2 pr-3">Ce notificări ai ales (o copie a preferințelor, pentru pagina de setări).</td>
+            <td className="py-2">până o ștergi</td>
+          </tr>
+          <tr className="border-b border-rule align-top">
             <td className="mono py-2 pr-3 text-[13px]">median_admin</td>
             <td className="py-2 pr-3">cookie</td>
             <td className="py-2 pr-3">Sesiunea editorilor în panoul de administrare. Nu se setează pentru cititori.</td>

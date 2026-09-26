@@ -225,6 +225,25 @@ const MIGRATIONS: string[] = [
   ALTER TABLE stories ADD COLUMN lead_item_id TEXT;
   ALTER TABLE items ADD COLUMN page_meta INTEGER NOT NULL DEFAULT 0;
   `,
+  // 5 — notificări web push (fără cont): abonamentul browserului, subiectele alese și ce s-a trimis
+  `
+  CREATE TABLE push_subs (
+    endpoint TEXT PRIMARY KEY,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    topics TEXT NOT NULL DEFAULT '[]',
+    follows TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    fails INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE push_sent (
+    key TEXT NOT NULL,
+    endpoint TEXT NOT NULL DEFAULT '',
+    at INTEGER NOT NULL,
+    PRIMARY KEY (key, endpoint)
+  );
+  `,
 ];
 
 type DB = Database.Database;

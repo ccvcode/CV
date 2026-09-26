@@ -455,3 +455,55 @@ a.hl-link:hover {
     display: none;
   }
 }
+
+/* Codurile ANM: culorile oficiale, doar ca marcaj (textul spune mereu și numele codului). */
+.lvl {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+}
+.lvl-1 {
+  background: #f2c200;
+}
+.lvl-2 {
+  background: #f07d00;
+}
+.lvl-3 {
+  background: #d7191c;
+}
+.lvl-q {
+  background: var(--ink);
+  border-radius: 999px;
+}
+
+/* „De la ultima vizită”: un punct roșu înaintea titlurilor noi, „nou” în cronologia subiectului. */
+.new-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+[data-nou] :is(.hl, h2, h3, h4) > a::before {
+  content: "";
+  display: inline-block;
+  width: 0.4em;
+  height: 0.4em;
+  margin-right: 0.35em;
+  border-radius: 999px;
+  background: var(--accent);
+  vertical-align: 0.14em;
+}
+[data-nou] .tl-name::after {
+  content: "nou";
+  margin-left: 0.5em;
+  padding: 0 0.35em;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--on-ink);
+  background: var(--accent);
+}

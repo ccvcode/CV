@@ -12,6 +12,9 @@ import { CATEGORY_MAP } from "@/lib/core/categories";
 import type { ArticleQuote } from "@/lib/core/types";
 import { dayLabel, formatDate, formatLongDate, formatTime } from "@/lib/core/utils";
 import { distinctStories, getStory, mostRead, type SourceChip } from "@/lib/data/queries";
+import { coverageOf } from "@/lib/data/coverage";
+import { CoverageMap } from "@/components/coverage";
+import { FollowButton } from "@/components/push";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +68,7 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
     mostRead(8).stories.filter((r) => r.id !== s.card.id && !s.related.some((x) => x.id === r.id)),
     [s.card, ...s.related]
   ).slice(0, 5);
+  const coverage = coverageOf(s.card.category, outlets, Date.now() - s.card.published);
   const pull: ArticleQuote | undefined = a?.quotes.find((q) => q.text.length > 40 && q.text.length < 260);
 
   const jsonLd = {
@@ -84,7 +88,7 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
   };
 
   return (
-    <main className="pb-6">
+    <main className="pb-6" data-story={s.card.id}>
       <ReadingProgress />
       <ViewBeacon id={s.card.id} />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }} />
@@ -249,11 +253,20 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
               )}
             </div>
 
+            {/* Cine a relatat (și cine nu) */}
+            <CoverageMap coverage={coverage} category={s.card.category} links={new Map(s.sources.map((x) => [x.name, x.url]))} />
+
             {/* Surse */}
             <section className="mt-12 border-t-2 border-rule-strong pt-3" id="surse">
               <h2 className="kicker text-ink-2">
                 {a ? "Surse · cronologia subiectului" : outletCount > 1 ? `Cum au relatat ${outletCount} publicații · cronologie` : "Sursa"}
               </h2>
+              <p id="nou-subiect" hidden className="ui mt-3 flex items-center gap-2 text-[14px] font-semibold">
+                <span aria-hidden className="new-dot" />
+                <span>
+                  <span data-n /> de la ultima ta vizită (<span data-when />)
+                </span>
+              </p>
               <Timeline sources={s.sources} heroKey={hero?.smallSrc} />
               <p className="ui mt-6 text-[12px] leading-relaxed text-ink-3">
                 {a
@@ -297,9 +310,12 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
                 <h2 className="kicker text-ink-2">Persoane și locuri</h2>
                 <div className="ui mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[14px]">
                   {s.topics.map((t) => (
-                    <Link key={t} href={`/cauta?q=${encodeURIComponent(t)}`} className="underline decoration-rule underline-offset-4 hover:decoration-ink">
-                      {t}
-                    </Link>
+                    <span key={t} className="inline-flex items-center gap-1.5">
+                      <Link href={`/cauta?q=${encodeURIComponent(t)}`} className="underline decoration-rule underline-offset-4 hover:decoration-ink">
+                        {t}
+                      </Link>
+                      <FollowButton name={t} />
+                    </span>
                   ))}
                 </div>
               </section>
@@ -375,14 +391,14 @@ function Timeline({ sources, heroKey }: { sources: SourceChip[]; heroKey?: strin
     const showThumb = Boolean(first.thumb && i < 8 && !shownThumbs.has(thumbKey));
     if (showThumb) shownThumbs.add(thumbKey);
     return (
-      <li key={first.url} className="flex gap-4 border-b border-rule py-3 last:border-0">
+      <li key={first.url} data-ts-item={Math.max(first.published, ...more.map((m) => m.published))} className="flex gap-4 border-b border-rule py-3 last:border-0">
         <span className="ui w-14 shrink-0 pt-0.5 text-[12px] leading-tight text-ink-3" suppressHydrationWarning>
           {!first.timeUncertain && <b className="block text-[13px] font-semibold text-ink-2">{formatTime(first.published)}</b>}
           {dayLabel(first.published)}
         </span>
         <div className="min-w-0 flex-1">
           <div className="ui text-[14px] font-semibold">
-            {first.name}
+            <span className="tl-name">{first.name}</span>
             {i === 0 && groups.length > 1 && <span className="kicker ml-2 text-accent">Primul raport</span>}
           </div>
           <a href={first.url} target="_blank" rel="noopener" className="mt-0.5 block text-[16px] leading-snug hover:underline">

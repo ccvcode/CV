@@ -5,6 +5,9 @@ import { Footer } from "@/components/footer";
 import { Masthead, themeScript } from "@/components/masthead";
 import { weatherLabel } from "@/components/weather";
 import { RatesTicker } from "@/components/markets";
+import { AlertsStrip } from "@/components/alerts";
+import { VisitMarks } from "@/components/visit-marks";
+import { activeAlerts } from "@/lib/data/alerts";
 import { config } from "@/lib/core/config";
 import { aiMode, siteStatus } from "@/lib/data/queries";
 import { formatTime } from "@/lib/core/utils";
@@ -35,7 +38,11 @@ export const dynamic = "force-dynamic";
 
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const [rates, weather] = await Promise.all([getRates().catch(() => null), getWeather().catch(() => null)]);
+  const [rates, weather, alerts] = await Promise.all([
+    getRates().catch(() => null),
+    getWeather().catch(() => null),
+    activeAlerts().catch(() => ({ weather: [], quakes: [] })),
+  ]);
   const status = siteStatus();
   const buc = weather?.[0];
   const utility = (
@@ -62,6 +69,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           Sari la conținut
         </a>
         <Masthead utility={utility} ticker={rates ? <RatesTicker rates={rates} /> : undefined} />
+        <AlertsStrip weather={alerts.weather} quakes={alerts.quakes} />
         {status.demo && (
           <div className="ui border-b border-rule bg-surface">
             <p className="mx-auto max-w-[1320px] px-4 py-2 text-[12px] text-ink-2 sm:px-8">
@@ -72,6 +80,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         )}
         <div id="continut">{children}</div>
         <Footer ai={aiMode()} />
+        <VisitMarks />
       </body>
     </html>
   );

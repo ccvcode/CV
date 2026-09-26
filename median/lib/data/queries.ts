@@ -1,6 +1,7 @@
 import { config } from "../core/config";
 import { db, today } from "../core/db";
 import { entities, fold, GENERIC_ENTITIES, keywords, properNames } from "../pipeline/text";
+import { type Coverage, coverageOf, type GroupKey } from "./coverage";
 import type { ArticleQuote, ArticleSection, ArticleSourceRef, CategorySlug, ImageRow, Img, RegionSlug } from "../core/types";
 
 /*
@@ -588,4 +589,67 @@ export function relatedStories(id: string, limit = 4): StoryCard[] {
   const cardRows = d.prepare(`${STORY_SELECT} WHERE s.id IN (${ids.map(() => "?").join(",")}) AND ${visibility()}`).all(...ids) as StoryRow[];
   const order = new Map(ids.map((x, i) => [x, i]));
   return cards(cardRows.sort((a, b) => order.get(a.id)! - order.get(b.id)!).slice(0, limit));
+}
+
+/**
+ * „Unghi mort”: subiecte relatate de cel puțin 4 publicații (în ultimele 48 de ore), pe care un
+ * întreg tip de redacții (ex. toate televiziunile active) nu le-a relatat.
+ */
+export function blindspotStories(limit = 12): { story: StoryCard; blind: GroupKey[]; coverage: Coverage }[] {
+  const rows = db()
+    .prepare(
+      `${STORY_SELECT} WHERE ${visibility()} AND s.last_published_at > @since AND s.first_published_at < @old AND s.source_count >= 4
+         AND s.category IN ('national', 'politica', 'economie', 'international')
+       ORDER BY s.source_count DESC, s.score DESC LIMIT 150`
+    )
+    .all({ since: Date.now() - 48 * 3600_000, old: Date.now() - 3 * 3600_000 }) as StoryRow[];
+  const out: { story: StoryCard; blind: GroupKey[]; coverage: Coverage }[] = [];
+  for (const story of cards(rows)) {
+    const coverage = coverageOf(story.category, story.sources.map((x) => x.name), Date.now() - story.published);
+    if (coverage.blind.length) out.push({ story, blind: coverage.blind, coverage });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/**
+ * „Ce trebuie să știi azi”: cele mai relatate subiecte din ultimele 24 de ore, fără nișe, cel mult
+ * două pe categorie, cu cel puțin unul internațional dacă există. Ordinea: câte redacții au relatat.
+ */
+export function briefStories(limit = 7, now = Date.now()): StoryCard[] {
+  const rows = db()
+    .prepare(
+      `${STORY_SELECT} WHERE ${visibility()} AND s.first_published_at > @since AND s.source_count >= 2
+         AND s.category NOT IN ('monden', 'lifestyle', 'auto')
+       ORDER BY s.source_count DESC, s.score DESC LIMIT 80`
+    )
+    .all({ since: now - 24 * 3600_000 }) as StoryRow[];
+  const pool = distinctStories(rows);
+  const perCat = new Map<string, number>();
+  const out: StoryRow[] = [];
+  for (const r of pool) {
+    if ((perCat.get(r.category) ?? 0) >= 2) continue;
+    perCat.set(r.category, (perCat.get(r.category) ?? 0) + 1);
+    out.push(r);
+    if (out.length >= limit) break;
+  }
+  if (!out.some((r) => r.category === "international")) {
+    const intl = pool.find((r) => r.category === "international" && !out.includes(r));
+    if (intl) out.splice(Math.min(out.length, limit - 1), 1, intl);
+  }
+  return cards(out);
+}
+
+/** Textul simplu al rezumatului (Telegram, WhatsApp, notificări). */
+export function briefText(stories: StoryCard[], siteUrl = config.siteUrl): string {
+  const day = new Intl.DateTimeFormat("ro-RO", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/Bucharest" }).format(Date.now());
+  const lines = stories.map((s, i) => `${i + 1}. ${s.title} (${s.sourceCount} publicații)\n${siteUrl}${s.href}`);
+  return `Ce trebuie să știi azi, ${day}:\n\n${lines.join("\n\n")}\n\nToate știrile: ${siteUrl}/azi`;
+}
+
+/** Cardurile unor subiecte, după ID (ordinea nu e garantată). */
+export function storyCards(ids: string[]): StoryCard[] {
+  if (!ids.length) return [];
+  const rows = db().prepare(`${STORY_SELECT} WHERE s.id IN (${ids.map(() => "?").join(",")}) AND ${visibility()}`).all(...ids) as StoryRow[];
+  return cards(rows);
 }

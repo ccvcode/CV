@@ -1,8 +1,8 @@
 node_modules
 .next
 .cache
-data
-out
+/data
+/out
 *.tsbuildinfo
 next-env.d.ts
 .env

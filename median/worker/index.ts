@@ -9,6 +9,7 @@ import { db, logEvent } from "../lib/core/db";
 import { SOURCES } from "../lib/core/sources";
 import type { Source } from "../lib/core/types";
 import { ingestDue, rescoreRecent, syncSources } from "../lib/pipeline/ingest";
+import { runNotifications } from "../lib/pipeline/notify";
 import { claim, complete, fail, postpone, pruneJobs, reclaimStale, releaseAllRunning, type Job, type JobType } from "../lib/pipeline/jobs";
 import { fetchFullText } from "../lib/pipeline/fulltext";
 import { chooseHero } from "../lib/pipeline/images/hero";
@@ -71,6 +72,11 @@ async function schedulerLoop() {
       reclaimStale();
     } catch (e) {
       logEvent("error", `eroare la colectare: ${(e as Error).message}`);
+    }
+    try {
+      await runNotifications();
+    } catch (e) {
+      logEvent("error", `eroare la notificări: ${(e as Error).message}`);
     }
     await sleep(60_000);
   }

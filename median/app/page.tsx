@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Figure } from "@/components/figure";
 import { LiveUpdater } from "@/components/live-updater";
 import { Markets } from "@/components/markets";
+import { blindLabel } from "@/components/coverage";
 import { Weather } from "@/components/weather";
 import { SectionHead } from "@/components/section";
 import { Kicker, leadClass, listImage, Meta, StoryBlock, StoryLink, StoryRow, sourcesLabel } from "@/components/story";
@@ -9,7 +10,7 @@ import { Clock } from "@/components/time";
 import { Ticker } from "@/components/ticker";
 import { REGION_MAP, REGIONS } from "@/lib/core/categories";
 import type { CategorySlug } from "@/lib/core/types";
-import { breakingStories, distinctStories, relatedStories, sharesName, latestStories, mostRead, topStories, type StoryCard } from "@/lib/data/queries";
+import { blindspotStories, breakingStories, distinctStories, relatedStories, sharesName, latestStories, mostRead, topStories, type StoryCard } from "@/lib/data/queries";
 import { getRates, getWeather } from "@/lib/data/widgets";
 
 export const dynamic = "force-dynamic";
@@ -67,6 +68,7 @@ export default async function Home() {
   // „Pe scurt” și „Cele mai relatate” arată doar ce nu apare deja în altă parte a paginii.
   const latest = latestStories({ limit: 60 }).filter((s) => !used.has(s.id)).slice(0, 8);
   latest.forEach((s) => used.add(s.id));
+  const blind = blindspotStories(6).filter((b) => !used.has(b.story.id)).slice(0, 3);
   const readAll = mostRead(30);
   const read = { byViews: readAll.byViews, stories: readAll.stories.filter((s) => !used.has(s.id)).slice(0, 6) };
 
@@ -74,6 +76,14 @@ export default async function Home() {
     <main>
       <LiveUpdater since={Date.now()} />
       <Ticker items={breaking.map((s) => ({ href: s.href, title: s.title, ts: s.published }))} />
+      <div className="mx-auto max-w-[1320px] px-4 sm:px-8">
+        <p id="de-la-ultima" hidden className="ui flex items-center gap-2 border-b border-rule py-2 text-[13px] text-ink-2">
+          <span aria-hidden className="new-dot" />
+          <span>
+            De la ultima ta vizită (<span data-when />): <b className="text-ink" data-n /> subiecte noi, marcate cu punct roșu.
+          </span>
+        </p>
+      </div>
 
       <div className="mx-auto max-w-[1320px] px-4 sm:px-8">
         {/* 1. Subiectul principal */}
@@ -87,7 +97,7 @@ export default async function Home() {
           </div>
           <div className="lg:col-span-5 lg:border-l lg:border-rule lg:pl-6">
             <div className="mb-4 h-[3px] w-14 bg-accent" />
-            <article className="group relative">
+            <article className="group relative" data-ts={lead.published}>
               <Kicker story={lead} className="mb-2" />
               <h2 className={`hl ${leadClass(lead.title)}`}>
                 <Link href={lead.href} className="stretched">
@@ -147,7 +157,7 @@ export default async function Home() {
             <SectionHead title="Pe scurt" href="/pe-scurt" size="md" />
             <ol className="relative">
               {latest.slice(0, 8).map((s) => (
-                <li key={s.id} className="group relative grid grid-cols-[64px_1fr] gap-4 border-b border-rule py-3 last:border-0">
+                <li key={s.id} data-ts={s.published} className="group relative grid grid-cols-[64px_1fr] gap-4 border-b border-rule py-3 last:border-0">
                   <Clock ts={s.published} className="mono pt-0.5 text-[13px] text-ink-3" />
                   <div>
                     <Kicker story={s} className="mb-1" />
@@ -169,7 +179,7 @@ export default async function Home() {
             <SectionHead title={read.byViews ? "Cele mai citite" : "Cele mai relatate"} size="md" />
             <ol>
               {read.stories.map((s, i) => (
-                <li key={s.id} className="group relative flex gap-4 border-b border-rule py-3 last:border-0">
+                <li key={s.id} data-ts={s.published} className="group relative flex gap-4 border-b border-rule py-3 last:border-0">
                   <span className="section-head w-7 shrink-0 text-[30px] leading-none text-ink-3/60">{i + 1}</span>
                   <div className="min-w-0">
                     <h3 className="hl hl-sm">
@@ -182,6 +192,25 @@ export default async function Home() {
                 </li>
               ))}
             </ol>
+            {blind.length > 0 && (
+              <div className="mt-10">
+                <SectionHead title="Unghi mort" href="/unghi-mort" size="md" />
+                <p className="ui -mt-2 mb-2 text-[12px] text-ink-3">Subiecte relatate pe larg, dar ignorate de un tip de redacții.</p>
+                <ul>
+                  {blind.map(({ story: s, blind: g }) => (
+                    <li key={s.id} data-ts={s.published} className="group relative border-b border-rule py-3 last:border-0">
+                      <div className="kicker mb-1 text-accent-ink">{blindLabel(g)}</div>
+                      <h3 className="hl hl-sm">
+                        <Link href={s.href} className="stretched">
+                          {s.title}
+                        </Link>
+                      </h3>
+                      <div className="meta mt-1">{s.sourceCount} surse</div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </aside>
         </section>
 
@@ -204,7 +233,7 @@ export default async function Home() {
             {intl.length > 6 && (
               <div className="mt-6 grid gap-6 border-t border-rule pt-5 sm:grid-cols-2 lg:grid-cols-4">
                 {intl.slice(6, 10).map((s) => (
-                  <article key={s.id} className="group relative flex gap-3">
+                  <article key={s.id} data-ts={s.published} className="group relative flex gap-3">
                     {listImage(s) && <Figure img={listImage(s)!} ratio="1/1" sizes="80px" className="w-20 shrink-0" />}
                     <div className="min-w-0">
                       <div className="kicker mb-1 text-ink-2">{s.region ? REGION_MAP[s.region]?.label : "Extern"}</div>
@@ -288,7 +317,7 @@ export default async function Home() {
             <SectionHead title="Monden" href="/categorie/monden" size="md" />
             <div className="grid grid-cols-2 gap-x-5 gap-y-8 lg:grid-cols-4 lg:gap-x-8">
               {monden.map((s) => (
-                <article key={s.id} className="group relative">
+                <article key={s.id} data-ts={s.published} className="group relative">
                   {listImage(s) && <Figure img={listImage(s)!} ratio="3/2" sizes="(max-width: 1024px) 50vw, 300px" className="mb-3" />}
                   <h3 className="hl line-clamp-4 text-[16px] leading-snug sm:text-[18px]">
                     <Link href={s.href} className="stretched">
@@ -347,7 +376,7 @@ function Magazine({ stories }: { stories: StoryCard[] }) {
         {rest.length > 0 && (
           <div className="mt-8 grid gap-6 sm:grid-cols-3">
             {rest.slice(0, 3).map((s) => (
-              <article key={s.id} className="group relative border-t border-band-rule pt-3">
+              <article key={s.id} data-ts={s.published} className="group relative border-t border-band-rule pt-3">
                 <div className="kicker mb-1 opacity-60">{label(s)}</div>
                 <h3 className="hl hl-sm line-clamp-3">
                   <Link href={s.href} className="stretched">

@@ -39,7 +39,7 @@ export default async function Live({ searchParams }: { searchParams: Promise<{ i
               <h2 className="kicker sticky top-[52px] z-10 border-b border-rule bg-paper py-2 capitalize text-ink-2">{g.day}</h2>
               <ol>
                 {g.items.map((s) => (
-                  <li key={s.id} className="group relative grid grid-cols-[64px_1fr] gap-4 border-b border-rule py-4">
+                  <li key={s.id} data-ts={s.published} className="group relative grid grid-cols-[64px_1fr] gap-4 border-b border-rule py-4">
                     <Clock ts={s.published} className="mono pt-0.5 text-[13px] text-ink-3" />
                     <div>
                       <Kicker story={s} className="mb-1" />
@@ -68,7 +68,7 @@ export default async function Live({ searchParams }: { searchParams: Promise<{ i
             <h2 className="kicker border-b border-rule py-2 text-ink-2">{read.byViews ? "Cele mai citite" : "Cele mai relatate azi"}</h2>
             <ol>
               {read.stories.map((s, i) => (
-                <li key={s.id} className="group relative flex gap-3 border-b border-rule py-3">
+                <li key={s.id} data-ts={s.published} className="group relative flex gap-3 border-b border-rule py-3">
                   <span className="section-head w-7 shrink-0 text-[32px] text-ink-3">{i + 1}</span>
                   <h3 className="hl hl-sm">
                     <Link href={s.href} className="stretched">

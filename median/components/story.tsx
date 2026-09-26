@@ -91,7 +91,7 @@ export function StoryBlock({
 }) {
   const img = image ? listImage(story) : undefined;
   return (
-    <article className={cx("group relative", className)}>
+    <article className={cx("group relative", className)} data-ts={story.published}>
       {img && <Figure img={img} ratio={ratio} priority={priority} sizes={sizes} className="mb-3" />}
       <Kicker story={story} className="mb-1.5" />
       <Headline story={story} size={img || size !== "md" ? size : "lg"} />
@@ -105,7 +105,7 @@ export function StoryBlock({
 export function StoryRow({ story, thumb = false, kicker = true, className }: { story: StoryCard; thumb?: boolean; kicker?: boolean; className?: string }) {
   const img = thumb ? listImage(story) : undefined;
   return (
-    <article className={cx("group relative flex gap-4", className)}>
+    <article className={cx("group relative flex gap-4", className)} data-ts={story.published}>
       <div className="min-w-0 flex-1">
         {kicker && <Kicker story={story} className="mb-1" />}
         <Headline story={story} size="sm" />
@@ -119,7 +119,7 @@ export function StoryRow({ story, thumb = false, kicker = true, className }: { s
 /** Link text simplu, precedat de linie (pentru subiectele legate de știrea principală). */
 export function StoryLink({ story }: { story: StoryCard }) {
   return (
-    <li className="group relative flex gap-2 border-t border-rule py-2.5 first:border-t-0">
+    <li className="group relative flex gap-2 border-t border-rule py-2.5 first:border-t-0" data-ts={story.published}>
       <span aria-hidden className="mt-[11px] h-px w-3 shrink-0 bg-ink-3" />
       <div>
         <h4 className="hl hl-sm">

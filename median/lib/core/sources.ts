@@ -44,7 +44,7 @@ const ROWS: Row[] = [
   ["EVZ", "https://evz.ro", "https://evz.ro/feed", "national", "presa"],
 
   ["Newsweek România", "https://newsweek.ro", "https://newsweek.ro/rss", "national", "presa"],
-  ["Europa FM", "https://www.europafm.ro", "https://www.europafm.ro/feed/", "national", "online"],
+  ["Europa FM", "https://www.europafm.ro", "https://www.europafm.ro/feed/", "national", "tv"],
   ["Ziare.com", "https://ziare.com", "https://ziare.com/rss/actualitate.xml", "national", "online"],
   ["Context", "https://www.context.ro", "https://www.context.ro/feed/", "national", "online"],
   ["DefenseRomania", "https://www.defenseromania.ro", "https://www.defenseromania.ro/feed", "national", "online"], // apărare: categoria după conținut

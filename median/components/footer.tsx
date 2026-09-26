@@ -25,10 +25,12 @@ const COLS: { title: string; links: [string, string][] }[] = [
   {
     title: "Urmărește",
     links: [
+      ["/azi", "Ce trebuie să știi azi"],
+      ["/unghi-mort", "Unghi mort"],
+      ["/alerte", "Alerte meteo și cutremure"],
+      ["/notificari", "Notificări"],
       ["/pe-scurt", "Toate știrile, pe scurt"],
-      ["/salvate", "Articole salvate"],
       ["/rss.xml", "Flux RSS"],
-      ["/contact", "Contact"],
     ],
   },
 ];
