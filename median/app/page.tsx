@@ -7,7 +7,7 @@ import { Clock } from "@/components/time";
 import { Ticker } from "@/components/ticker";
 import { REGION_MAP, REGIONS } from "@/lib/core/categories";
 import type { CategorySlug } from "@/lib/core/types";
-import { breakingStories, latestStories, mostRead, siteStatus, topStories, type StoryCard } from "@/lib/data/queries";
+import { breakingStories, distinctStories, relatedStories, sharesName, latestStories, mostRead, siteStatus, topStories, type StoryCard } from "@/lib/data/queries";
 import { getRates, getWeather } from "@/lib/data/widgets";
 
 export const dynamic = "force-dynamic";
@@ -26,9 +26,20 @@ export default async function Home() {
   const fresh = pool.filter((s) => Date.now() - s.updated < 12 * 3600_000);
   const lead = fresh.slice(0, 3).find(bigPhoto) ?? withPhoto(fresh)[0] ?? withPhoto(pool)[0] ?? pool[0];
   used.add(lead.id);
-  const related = pool.filter((s) => s.id !== lead.id && s.category === lead.category).slice(0, 2);
+  // Sub știrea principală: doar subiecte cu adevărat legate de ea (nume comun, cuvinte rare comune), recente.
+  const related = distinctStories(
+    relatedStories(lead.id, 6).filter((s) => Date.now() - s.updated < 36 * 3600_000),
+    [lead]
+  ).slice(0, 2);
   related.forEach((s) => used.add(s.id));
-  const secondary = [...withPhoto(pool), ...pool].filter((s, i, a) => !used.has(s.id) && a.findIndex((x) => x.id === s.id) === i).slice(0, 4);
+  // Secundarele nu repetă subiectul principal cu alte cuvinte și cel mult una e despre aceeași persoană.
+  let sameName = 0;
+  const secondary = distinctStories(
+    [...withPhoto(pool), ...pool].filter((s, i, a) => !used.has(s.id) && a.findIndex((x) => x.id === s.id) === i),
+    [lead, ...related]
+  )
+    .filter((s) => !sharesName(s.title, lead.title) || sameName++ < 1)
+    .slice(0, 4);
   secondary.forEach((s) => used.add(s.id));
 
   const breaking = breakingStories(8);
@@ -51,7 +62,7 @@ export default async function Home() {
   const auto = section("auto", 5);
   const cultura = section("cultura", 4, 120);
   const lifestyle = section("lifestyle", 3, 120);
-  const monden = section("monden", 6, 96);
+  const monden = section("monden", 4, 96);
   // „Pe scurt” și „Cele mai relatate” arată doar ce nu apare deja în altă parte a paginii.
   const latest = latestStories({ limit: 60 }).filter((s) => !used.has(s.id)).slice(0, 8);
   latest.forEach((s) => used.add(s.id));
@@ -296,15 +307,16 @@ export default async function Home() {
         {monden.length > 0 && (
           <section className="mt-16">
             <SectionHead title="Monden" href="/categorie/monden" size="md" />
-            <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-6">
+            <div className="grid grid-cols-2 gap-x-5 gap-y-8 lg:grid-cols-4 lg:gap-x-8">
               {monden.map((s) => (
                 <article key={s.id} className="group relative">
-                  {listImage(s) && <Figure img={listImage(s)!} ratio="1/1" sizes="200px" className="mb-2" />}
-                  <h3 className="hl text-[15px] leading-snug">
+                  {listImage(s) && <Figure img={listImage(s)!} ratio="3/2" sizes="(max-width: 1024px) 50vw, 300px" className="mb-3" />}
+                  <h3 className="hl line-clamp-4 text-[16px] leading-snug sm:text-[18px]">
                     <Link href={s.href} className="stretched">
                       {s.title}
                     </Link>
                   </h3>
+                  <Meta story={s} className="mt-1.5" />
                 </article>
               ))}
             </div>

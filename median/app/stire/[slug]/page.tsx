@@ -10,8 +10,8 @@ import { isAdmin } from "@/lib/admin/auth";
 import { config } from "@/lib/core/config";
 import { CATEGORY_MAP } from "@/lib/core/categories";
 import type { ArticleQuote } from "@/lib/core/types";
-import { formatDate, formatLongDate, formatTime } from "@/lib/core/utils";
-import { getStory, type SourceChip } from "@/lib/data/queries";
+import { dayLabel, formatDate, formatLongDate, formatTime } from "@/lib/core/utils";
+import { distinctStories, getStory, mostRead, type SourceChip } from "@/lib/data/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +61,10 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
   const readOn = [...new Map(s.sources.map((x) => [x.name, x])).values()].slice(0, 6);
   const outlets = [...new Set(s.sources.map((x) => x.name))];
   const updated = a && a.updated - a.published > 5 * 60_000 ? a.updated : undefined;
+  const popular = distinctStories(
+    mostRead(8).stories.filter((r) => r.id !== s.card.id && !s.related.some((x) => x.id === r.id)),
+    [s.card, ...s.related]
+  ).slice(0, 5);
   const pull: ArticleQuote | undefined = a?.quotes.find((q) => q.text.length > 40 && q.text.length < 260);
 
   const jsonLd = {
@@ -313,13 +317,27 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
               </section>
             )}
             {s.related.length > 0 && (
-              <section className="lg:sticky lg:top-20">
+              <section className="mb-8">
                 <h2 className="kicker text-ink-2">Legate de acest subiect</h2>
                 <div className="mt-2">
                   {s.related.map((r) => (
                     <StoryRow key={r.id} story={r} kicker={false} className="border-b border-rule py-3 last:border-0" />
                   ))}
                 </div>
+              </section>
+            )}
+            {popular.length > 0 && (
+              // Marginea nu rămâne goală: cele mai citite subiecte ale zilei, numerotate.
+              <section className="hidden lg:sticky lg:top-20 lg:block">
+                <h2 className="kicker text-ink-2">Cele mai citite</h2>
+                <ol className="mt-2">
+                  {popular.map((r, i) => (
+                    <li key={r.id} className="flex gap-3 border-b border-rule py-3 last:border-0">
+                      <span className="hl w-6 shrink-0 text-[24px] leading-none text-accent">{i + 1}</span>
+                      <StoryRow story={r} kicker={false} className="min-w-0 flex-1" />
+                    </li>
+                  ))}
+                </ol>
               </section>
             )}
           </aside>
@@ -360,7 +378,7 @@ function Timeline({ sources, heroKey }: { sources: SourceChip[]; heroKey?: strin
       <li key={first.url} className="flex gap-4 border-b border-rule py-3 last:border-0">
         <span className="ui w-14 shrink-0 pt-0.5 text-[12px] leading-tight text-ink-3" suppressHydrationWarning>
           {!first.timeUncertain && <b className="block text-[13px] font-semibold text-ink-2">{formatTime(first.published)}</b>}
-          {formatDay(first.published)}
+          {dayLabel(first.published)}
         </span>
         <div className="min-w-0 flex-1">
           <div className="ui text-[14px] font-semibold">
@@ -422,9 +440,4 @@ function pickAngles(sources: SourceChip[], exceptUrl?: string): SourceChip[] {
     if (out.length >= 4) break;
   }
   return out;
-}
-
-/** „26 sept.”: ziua scurtă, pentru cronologie. */
-function formatDay(ts: number): string {
-  return new Intl.DateTimeFormat("ro-RO", { day: "numeric", month: "short", timeZone: "Europe/Bucharest" }).format(ts);
 }

@@ -6,7 +6,7 @@ import { hashId, slugify } from "../core/utils";
 import { httpGet } from "./http";
 import { enqueue } from "./jobs";
 import { parseFeed } from "./rss";
-import { byCentrality, classifyCategory, detectRegion, detectSensitive, docVector, fingerprint, fingerprintSimilarity, keywords, sameStory, similarity, type DocVector } from "./text";
+import { byCentrality, classifyCategory, isGaming, detectRegion, detectSensitive, docVector, fingerprint, fingerprintSimilarity, keywords, sameStory, similarity, type DocVector } from "./text";
 
 const WINDOW_MS = 36 * 3600_000;
 
@@ -285,6 +285,8 @@ export function refreshStory(storyId: string, now = Date.now()) {
     const c = classifyCategory(items.map((i) => i.title), items.map((i) => i.summary)) as CategorySlug | undefined;
     category = c && !NICHE.includes(c) ? c : "national";
   }
+  // Jocurile video și gadgeturile apar și în fluxurile de film sau divertisment; locul lor e la „Tech”.
+  if (["cultura", "monden", "lifestyle", "national"].includes(category) && isGaming(items.map((i) => i.title), items.map((i) => i.summary))) category = "tech";
   // Dacă există deja un articol publicat, categoria aleasă de redactor are prioritate.
   if (story.article_id) {
     const a = d.prepare("SELECT s2.category FROM stories s2 WHERE s2.id = ?").get(storyId) as { category: CategorySlug };

@@ -106,26 +106,45 @@ export function readingTime(text: string): number {
   return Math.max(1, Math.round(words / 220));
 }
 
-const rtf = new Intl.RelativeTimeFormat("ro", { numeric: "auto" });
+const DAY_KEY = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Bucharest" }); // „2026-09-26”
 
-export function timeAgo(ts: number, now = Date.now()): string {
-  const diff = Math.round((ts - now) / 1000);
-  const abs = Math.abs(diff);
-  if (abs < 45) return "chiar acum";
-  if (abs < 3600) return rtf.format(Math.round(diff / 60), "minute");
-  if (abs < 86400) return rtf.format(Math.round(diff / 3600), "hour");
-  if (abs < 86400 * 2) return rtf.format(Math.round(diff / 86400), "day");
-  return formatDate(ts);
+/** Zile calendaristice (ora României) între două momente: 0 = aceeași zi, 1 = ieri. */
+function daysBetween(ts: number, now: number): number {
+  const d = (t: number) => Date.parse(DAY_KEY.format(t) + "T00:00:00Z");
+  return Math.round((d(now) - d(ts)) / 86400_000);
 }
 
-export function formatDate(ts: number): string {
-  return new Intl.DateTimeFormat("ro-RO", {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "Europe/Bucharest",
-  }).format(ts);
+/**
+ * Un singur format pentru orele de pe site: „chiar acum”, „acum 12 min”, „acum 3 ore”,
+ * apoi „azi, 14:05”, „ieri, 09:30” și „24 sept., 14:05”.
+ */
+export function timeAgo(ts: number, now = Date.now()): string {
+  const min = Math.round((now - ts) / 60_000);
+  if (min < 1) return "chiar acum";
+  if (min < 60) return `acum ${min} min`;
+  const days = daysBetween(ts, now);
+  if (min < 6 * 60 && days === 0) {
+    const h = Math.round(min / 60);
+    return h === 1 ? "acum o oră" : `acum ${h} ore`;
+  }
+  return formatDate(ts, now);
+}
+
+/** „azi, 14:05” / „ieri, 09:30” / „24 sept., 14:05”. */
+export function formatDate(ts: number, now = Date.now()): string {
+  return `${dayLabel(ts, now)}, ${formatTime(ts)}`;
+}
+
+/** „azi” / „ieri” / „24 sept.”. */
+export function dayLabel(ts: number, now = Date.now()): string {
+  const days = daysBetween(ts, now);
+  return days === 0 ? "azi" : days === 1 ? "ieri" : formatDay(ts, now);
+}
+
+/** „24 sept.” (cu anul, dacă nu e cel curent). */
+export function formatDay(ts: number, now = Date.now()): string {
+  const year = new Date(ts).getUTCFullYear() !== new Date(now).getUTCFullYear();
+  return new Intl.DateTimeFormat("ro-RO", { day: "numeric", month: "short", ...(year ? { year: "numeric" } : {}), timeZone: "Europe/Bucharest" }).format(ts);
 }
 
 export function formatTime(ts: number): string {

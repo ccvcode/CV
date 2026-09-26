@@ -63,3 +63,29 @@ test("regiunea și categoria nu se lasă păcălite de cuvinte românești asem�
   assert.equal(detectRegion("Putin spune că atacurile ucrainene au îndepărtat negocierile"), "ucraina");
   assert.equal(classifyCategory(["Horoscop 26 septembrie: sănătatea și banii"], ["Zodia Berbec are probleme de sănătate"]), "lifestyle");
 });
+
+test("jocurile video sunt „Tech”, chiar dacă vin din fluxuri de film", async () => {
+  const { isGaming } = await import("../lib/pipeline/text");
+  assert.equal(isGaming(["ILikeIT, jocul săptămânii. FC 27, testat. Ce aduce nou cel mai nou joc de fotbal de la EA Sports"]), true);
+  assert.equal(
+    isGaming(["Trailerul „101 Overview” pentru Ace Combat 8: Wings of Theve"], ["Editorul Bandai Namco a lansat un trailer pentru jocul de acțiune aeriană Ace Combat 8."]),
+    true
+  );
+  assert.equal(isGaming(["Brad Pitt revine pe marile ecrane cu un film despre Formula 1"]), false);
+  assert.equal(isGaming(["Jocul de culise din PSD după alegeri"]), false);
+});
+
+test("două subiecte care spun același lucru nu stau unul lângă altul", async () => {
+  const { nearDuplicate } = await import("../lib/data/queries");
+  assert.equal(nearDuplicate("Gică Hagi, după Suedia - România 2-1: „Asta am greșit”", "Gică Hagi a tras primele concluzii după Suedia – România 2-1"), true);
+  assert.equal(
+    nearDuplicate("Siegfried Mureșan, premierul desemnat, a depus la Parlament programul de guvernare", "Siegfried Mureșan vorbește despre alegeri anticipate: „Dacă PSD nu va vota acest guvern”"),
+    false
+  );
+  assert.equal(
+    nearDuplicate("Siegfried Mureșan, premierul desemnat, a depus la Parlament programul de guvernare", "Programul de guvernare al lui Siegfried Mureșan: cele mai importante măsuri"),
+    true
+  );
+  assert.equal(nearDuplicate("Siegfried Mureșan propune eliminarea cumulului pensiei cu salariul", "Guvernul Mureșan vrea să comaseze ANAF și Vama"), false);
+  assert.equal(nearDuplicate("Trump a respins propunerea Iranului pentru Ormuz", "Trump l-a avertizat pe Xi Jinping la Casa Albă"), false);
+});

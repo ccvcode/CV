@@ -285,6 +285,20 @@ const CATEGORY_RULES: [CategorySlugLite, RegExp][] = [
   ["lifestyle", /\b(vacant|turism|turist|retet|gastronom|moda\b|gradin|revelion|hotel|pensiun|sejur|horoscop|zodi|destinati|mic dejun|desert|prajitur|gatit|bucatari)/g],
   ["monden", /\b(vedet|actrit|actor|cantaret|nunt|divort|showbiz|gala|influencer|celebr|logodn)/g],
 ];
+const GAMING =
+  /\b(jocu(l|ri(le)?) video|gaming|gamer|playstation|ps5|xbox|nintendo|switch 2|steam\b|ea sports|ubisoft|rockstar games|gta ?(vi|6)|esports?|consol[aei] de jocuri|display(-uri)?\b|monitor(ul|ului|ae)? (de gaming|led|oled|portabil)|laptop|tablet[aei]\b|procesor|placa video|placi video|iphone|smartphone)/;
+
+const GAME_SUMMARY = /\b(jocul|jocului|joc) (de actiune|de strategie|de fotbal|de rol|video|multiplayer)|\b(dezvoltator(ul)?|editor(ul)?) [^.]{0,40}\b(games|namco|ubisoft|sony|nintendo)/;
+
+/** Știre despre jocuri video sau gadgeturi: majoritatea articolelor o spun explicit, în titlu sau în rezumat. */
+export function isGaming(titles: string[], summaries: string[] = []): boolean {
+  const hits = titles.filter((t, i) => {
+    const ft = fold(t);
+    return GAMING.test(ft) || /\bjocul saptamanii\b/.test(ft) || GAME_SUMMARY.test(fold((summaries[i] ?? "").slice(0, 600)));
+  }).length;
+  return hits > 0 && hits * 2 >= titles.length;
+}
+
 type CategorySlugLite = "politica" | "economie" | "sport" | "tech" | "sanatate" | "auto" | "cultura" | "lifestyle" | "monden";
 
 /**

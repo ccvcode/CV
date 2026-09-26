@@ -1,6 +1,6 @@
 import { config } from "../core/config";
 import { db, today } from "../core/db";
-import { entities, GENERIC_ENTITIES, keywords, properNames } from "../pipeline/text";
+import { entities, fold, GENERIC_ENTITIES, keywords, properNames } from "../pipeline/text";
 import type { ArticleQuote, ArticleSection, ArticleSourceRef, CategorySlug, ImageRow, Img, RegionSlug } from "../core/types";
 
 /*
@@ -178,6 +178,60 @@ export function snippet(s: string, max = SNIPPET_MAX): string {
   return cut.slice(0, Math.max(cut.lastIndexOf(" "), max - 20)).replace(/[,.;:–-]+$/, "") + "…";
 }
 
+const TITLE_STOP = new Set(
+  "dupa pentru despre care este sunt cele cele mai acum anul inca doar fara prin catre intre toate totul spune spus anunta anuntat romania romaniei romanii romani".split(" ")
+);
+function titleTokens(t: string): Set<string> {
+  return new Set(
+    fold(t)
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length >= 4 && !TITLE_STOP.has(w))
+      .map((w) => w.slice(0, 7))
+  );
+}
+
+/**
+ * Două subiecte care, pentru cititor, spun același lucru („Mureșan a depus programul de guvernare” și
+ * „Programul de guvernare al lui Mureșan: măsurile”): cel puțin trei elemente comune în titlu (un nume
+ * propriu, oricât de lung, contează o singură dată), sau două care fac jumătate din titlul mai scurt.
+ * Știrile diferite despre aceeași persoană („Mureșan, despre alegeri anticipate”) rămân separate.
+ */
+export function nearDuplicate(a: string, b: string): boolean {
+  const names = new Set([...titleNames(a), ...titleNames(b)]);
+  const x = titleTokens(a);
+  const y = titleTokens(b);
+  const shared = [...x].filter((w) => y.has(w));
+  const plain = shared.filter((w) => !names.has(w)).length;
+  const n = plain + (shared.length > plain ? 1 : 0);
+  const size = (t: Set<string>) => [...t].filter((w) => !names.has(w)).length + ([...t].some((w) => names.has(w)) ? 1 : 0);
+  return n >= 3 || (n >= 2 && n * 2 >= Math.min(size(x), size(y)));
+}
+
+/** Au un nume propriu specific comun în titlu (aceeași persoană, companie, loc). */
+export function sharesName(a: string, b: string): boolean {
+  const x = titleNames(a);
+  return [...titleNames(b)].some((n) => x.has(n));
+}
+
+function titleNames(t: string): Set<string> {
+  return new Set(
+    t
+      .split(/\s+/)
+      .slice(1)
+      .filter((w) => /^[„"“]?[A-ZĂÂÎȘȚ][a-zăâîșț]/.test(w))
+      .map((w) => fold(w).replace(/[^a-z0-9]/g, ""))
+      .filter((w) => w.length >= 4 && !GENERIC_ENTITIES.has(w) && !GENERIC_ENTITIES.has(w.slice(0, 6)))
+      .map((w) => w.slice(0, 7))
+  );
+}
+
+/** Păstrează ordinea, dar sare peste subiectele care repetă unul deja ales (și peste cele din „shown”). */
+export function distinctStories<T extends { title: string }>(list: T[], shown: { title: string }[] = []): T[] {
+  const out: T[] = [];
+  for (const s of list) if (![...shown, ...out].some((o) => nearDuplicate(o.title, s.title))) out.push(s);
+  return out;
+}
+
 export function topStories(opts: { limit: number; hours?: number; category?: CategorySlug; region?: RegionSlug; exclude?: Set<string>; needHero?: boolean }): StoryCard[] {
   const hours = opts.hours ?? 30;
   const where = [visibility(), "s.last_published_at > @since"];
@@ -186,8 +240,8 @@ export function topStories(opts: { limit: number; hours?: number; category?: Cat
   if (opts.needHero) where.push("s.hero_image_id IS NOT NULL");
   const rows = db()
     .prepare(`${STORY_SELECT} WHERE ${where.join(" AND ")} ORDER BY s.pinned DESC, s.score DESC LIMIT @lim`)
-    .all({ since: Date.now() - hours * 3600_000, category: opts.category ?? null, region: opts.region ?? null, lim: opts.limit + (opts.exclude?.size ?? 0) + 5 }) as StoryRow[];
-  const out = rows.filter((r) => !opts.exclude?.has(r.id)).slice(0, opts.limit);
+    .all({ since: Date.now() - hours * 3600_000, category: opts.category ?? null, region: opts.region ?? null, lim: opts.limit * 2 + (opts.exclude?.size ?? 0) + 5 }) as StoryRow[];
+  const out = distinctStories(rows.filter((r) => !opts.exclude?.has(r.id))).slice(0, opts.limit);
   for (const r of out) opts.exclude?.add(r.id);
   return cards(out);
 }
@@ -337,9 +391,11 @@ export function getStory(id: string, opts: { preview?: boolean } = {}): StoryDet
   // Subiecte legate: cuvinte-cheie comune RARE (un cuvânt care apare în multe subiecte, precum
   // „România” sau „guvern”, nu leagă nimic). Separat: cele mai noi știri din aceeași secțiune.
   const related = relatedStories(id);
-  const moreInCategory = latestStories({ limit: 8, category: row.category })
-    .filter((c) => c.id !== id && !related.some((r) => r.id === c.id))
-    .slice(0, 3);
+  // Trei carduri egale: doar subiecte cu poză, care nu repetă știrea curentă.
+  const moreInCategory = distinctStories(
+    latestStories({ limit: 20, category: row.category }).filter((c) => c.id !== id && !related.some((r) => r.id === c.id) && ((c.hero && c.hero.kind !== "card") || c.thumb)),
+    [card]
+  ).slice(0, 3);
 
   return {
     card,
@@ -412,11 +468,35 @@ export function countNewSince(ts: number): number {
 export function outletsList() {
   return db()
     .prepare(
-      `SELECT name, MIN(site) AS site, MIN(tier) AS tier, GROUP_CONCAT(category) AS categories,
-              SUM(CASE WHEN last_status IN ('200','304') THEN 1 ELSE 0 END) AS ok, COUNT(*) AS feeds, MAX(last_fetch_at) AS last_fetch
-       FROM sources WHERE enabled = 1 GROUP BY name ORDER BY name COLLATE NOCASE`
+      `SELECT s.name, MIN(s.site) AS site, MIN(s.tier) AS tier, GROUP_CONCAT(s.category) AS categories,
+              SUM(CASE WHEN s.last_status IN ('200','304') THEN 1 ELSE 0 END) AS ok, COUNT(*) AS feeds, MAX(s.last_fetch_at) AS last_fetch,
+              GROUP_CONCAT(CASE WHEN s.last_status NOT IN ('200','304') THEN s.last_error END, '|') AS errors,
+              (SELECT COUNT(*) FROM items i JOIN sources x ON x.id = i.source_id WHERE x.name = s.name AND i.fetched_at > ?) AS day
+       FROM sources s WHERE s.enabled = 1 GROUP BY s.name ORDER BY s.name COLLATE NOCASE`
     )
-    .all() as { name: string; site: string; tier: number; categories: string; ok: number; feeds: number; last_fetch: number | null }[];
+    .all(Date.now() - 86400_000) as {
+    name: string;
+    site: string;
+    tier: number;
+    categories: string;
+    ok: number;
+    feeds: number;
+    last_fetch: number | null;
+    errors: string | null;
+    day: number;
+  }[];
+}
+
+/** Motivul unui flux care nu răspunde, pe înțelesul cititorului. */
+export function feedProblem(errors: string | null): string {
+  const e = errors ?? "";
+  if (/\b429\b/.test(e)) return "limitează temporar accesul";
+  if (/\b40[13]\b/.test(e)) return "blochează accesul automat";
+  if (/\b404\b|\b410\b/.test(e)) return "flux mutat sau desființat";
+  if (/\b5\d\d\b/.test(e)) return "eroare pe serverul publicației";
+  if (/timeout|abort/i.test(e)) return "nu răspunde la timp";
+  if (/xml|parse|feed/i.test(e)) return "flux invalid";
+  return e ? "nu răspunde" : "în așteptarea primei verificări";
 }
 
 /**
@@ -464,7 +544,7 @@ function excerptOf(title: string, summary: string): string | undefined {
  * Subiectele cu adevărat legate: din ultimele 4 zile, cu un nume propriu comun și cel puțin 2 cuvinte-cheie comune în titlu care sunt
  * rare în perioada respectivă (ponderate ca IDF), ordonate după scorul de suprapunere.
  */
-function relatedStories(id: string, limit = 4): StoryCard[] {
+export function relatedStories(id: string, limit = 4): StoryCard[] {
   const d = db();
   const rows = d
     .prepare(`SELECT s.id, s.title FROM stories s WHERE s.status = 'active' AND s.last_published_at > ?`)
