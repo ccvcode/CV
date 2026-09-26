@@ -1,13 +1,11 @@
 import type { RatesData } from "@/lib/data/widgets";
 
-const LABEL: Record<string, string> = { EUR: "Euro", USD: "Dolar SUA", GBP: "Liră sterlină", CHF: "Franc elvețian", MDL: "Leu moldovenesc", XAU: "Aur (gram)" };
+const LABEL: Record<string, string> = { EUR: "Euro", USD: "Dolar SUA", GBP: "Liră sterlină", CHF: "Franc elvețian", MDL: "Leu moldovenesc", HUF: "Forint maghiar", XAU: "Aur (gram)" };
 const fmt = (v: number, big: boolean) => v.toFixed(big ? 2 : 4).replace(".", ",");
 
 /** Linie de tendință pe ultimele zile (o singură serie, în culoarea textului). */
-function Spark({ values, label }: { values: number[]; label: string }) {
+export function Spark({ values, label, w = 72, h = 22 }: { values: number[]; label: string; w?: number; h?: number }) {
   if (values.length < 2) return null;
-  const w = 72;
-  const h = 22;
   const min = Math.min(...values);
   const max = Math.max(...values);
   const span = max - min || 1;
@@ -17,7 +15,7 @@ function Spark({ values, label }: { values: number[]; label: string }) {
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} role="img" aria-label={label} className="shrink-0 text-ink-3">
       <title>{label}</title>
       <polyline points={pts.map((p) => p.join(",")).join(" ")} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={lx} cy={ly} r="2.5" className="fill-ink" />
+      <circle cx={lx} cy={ly} r={h < 20 ? 2 : 2.5} className="fill-ink" />
     </svg>
   );
 }
@@ -54,6 +52,47 @@ export function Markets({ rates, codes = ["EUR", "USD", "GBP", "XAU"] }: { rates
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+const change = (r: { value: number; prev?: number }) => {
+  const diff = r.prev != null ? r.value - r.prev : 0;
+  const pct = r.prev ? (diff / r.prev) * 100 : 0;
+  return { diff, text: diff === 0 ? "=" : `${diff > 0 ? "▲" : "▼"} ${pct > 0 ? "+" : ""}${pct.toFixed(2).replace(".", ",")}%` };
+};
+
+/**
+ * Banda de curs din bara de sus: toate valutele urmărite, cu variația zilei și tendința, într-o
+ * bandă care se derulează continuu (se oprește la hover; statică dacă utilizatorul a cerut mișcare
+ * redusă). Doar CSS, fără JavaScript.
+ */
+export function RatesTicker({ rates, codes = ["EUR", "USD", "GBP", "CHF", "MDL", "HUF", "XAU"] }: { rates: RatesData; codes?: string[] }) {
+  const list = codes.map((c) => rates.rates.find((r) => r.code === c)).filter((r): r is NonNullable<typeof r> => Boolean(r));
+  if (!list.length) return null;
+  const row = (hidden: boolean) => (
+    <ul className="flex shrink-0 items-center" aria-hidden={hidden || undefined}>
+      {list.map((r) => {
+        const big = r.value > 100;
+        const c = change(r);
+        return (
+          <li key={r.code} className="flex items-center gap-1.5 border-r border-rule px-3.5 whitespace-nowrap" title={LABEL[r.code]}>
+            <span className="font-semibold text-ink-2">{r.code === "XAU" ? "Aur" : r.code}</span>
+            <b className="mono font-medium text-ink">{fmt(r.value, big)}</b>
+            <span className="mono text-[11px] text-ink-3">{c.text}</span>
+            <Spark values={r.history} w={40} h={14} label={`${LABEL[r.code] ?? r.code}: ${r.history.map((v) => fmt(v, big)).join(" → ")} lei`} />
+          </li>
+        );
+      })}
+      <li className="whitespace-nowrap px-3.5 text-ink-3">Curs BNR</li>
+    </ul>
+  );
+  return (
+    <div className="marquee relative min-w-0 flex-1 overflow-hidden" aria-label="Cursul BNR">
+      <div className="marquee-track flex w-max">
+        {row(false)}
+        {row(true)}
       </div>
     </div>
   );

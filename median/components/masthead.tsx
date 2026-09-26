@@ -24,7 +24,7 @@ function Wordmark({ size }: { size: "lg" | "sm" | "xs" }) {
 
 const NAV = CATEGORIES.map((c) => ({ href: `/categorie/${c.slug}`, label: c.label }));
 
-export function Masthead({ utility }: { utility: React.ReactNode }) {
+export function Masthead({ utility, ticker }: { utility: React.ReactNode; ticker?: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [compact, setCompact] = useState(false);
@@ -95,9 +95,10 @@ export function Masthead({ utility }: { utility: React.ReactNode }) {
       {/* Bara utilitară */}
       <div className="ui border-b border-rule text-[12px] text-ink-2">
         <div className="mx-auto flex h-8 max-w-[1320px] items-center gap-4 px-4 sm:px-8">
-          <Today className="shrink-0 font-semibold text-ink first-letter:uppercase" />
-          <div className="hidden min-w-0 items-center gap-4 overflow-hidden md:flex">{utility}</div>
-          <div className="ml-auto flex items-center gap-4">
+          <Today className={cx("shrink-0 font-semibold text-ink first-letter:uppercase", ticker ? "hidden sm:inline" : undefined)} />
+          <div className="hidden shrink-0 items-center gap-4 md:flex">{utility}</div>
+          {ticker ?? <span className="flex-1" />}
+          <div className="flex shrink-0 items-center gap-4">
             <button onClick={() => setSearch(true)} className="hover:text-ink">
               Căutare
             </button>

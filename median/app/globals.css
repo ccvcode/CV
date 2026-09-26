@@ -426,3 +426,32 @@ a.hl-link:hover {
     animation: none;
   }
 }
+
+/* Bandă care se derulează continuu (cursul BNR din bara de sus). Conținutul e dublat, deci -50% = o tură. */
+.marquee {
+  mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+}
+.marquee-track {
+  animation: marquee 45s linear infinite;
+}
+.marquee:hover .marquee-track,
+.marquee:focus-within .marquee-track {
+  animation-play-state: paused;
+}
+@keyframes marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .marquee {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .marquee-track {
+    animation: none;
+  }
+  .marquee-track > [aria-hidden] {
+    display: none;
+  }
+}

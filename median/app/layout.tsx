@@ -4,6 +4,7 @@ import "./globals.css";
 import { Footer } from "@/components/footer";
 import { Masthead, themeScript } from "@/components/masthead";
 import { weatherLabel } from "@/components/weather";
+import { RatesTicker } from "@/components/markets";
 import { config } from "@/lib/core/config";
 import { aiMode, siteStatus } from "@/lib/data/queries";
 import { formatTime } from "@/lib/core/utils";
@@ -37,23 +38,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const [rates, weather] = await Promise.all([getRates().catch(() => null), getWeather().catch(() => null)]);
   const status = siteStatus();
   const buc = weather?.[0];
-  const eur = rates?.rates.find((r) => r.code === "EUR");
-  const usd = rates?.rates.find((r) => r.code === "USD");
   const utility = (
     <>
       {buc && (
         <span>
           București <b className="mono font-medium text-ink">{buc.temp}°</b> · {weatherLabel(buc.code)}
-        </span>
-      )}
-      {eur && (
-        <span>
-          EUR <b className="mono font-medium text-ink">{eur.value.toFixed(4).replace(".", ",")}</b>
-        </span>
-      )}
-      {usd && (
-        <span>
-          USD <b className="mono font-medium text-ink">{usd.value.toFixed(4).replace(".", ",")}</b>
         </span>
       )}
       {status.lastFetch > 0 && (
@@ -72,7 +61,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <a href="#continut" className="ui sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:bg-ink focus:px-3 focus:py-2 focus:text-on-ink">
           Sari la conținut
         </a>
-        <Masthead utility={utility} />
+        <Masthead utility={utility} ticker={rates ? <RatesTicker rates={rates} /> : undefined} />
         {status.demo && (
           <div className="ui border-b border-rule bg-surface">
             <p className="mx-auto max-w-[1320px] px-4 py-2 text-[12px] text-ink-2 sm:px-8">
