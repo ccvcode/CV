@@ -1,0 +1,156 @@
+# Colectare automată: firme noi (ONRC) + date ANAF (telefon, adresă, CAEN, TVA).
+#
+# Rulează DOAR într-un repository PRIVAT (rezultatele conțin date de contact).
+# Pornește: zilnic, manual (Actions → Run workflow) sau la modificarea
+# fișierului `rulare.txt`. Rezultatele (Excel + CSV) apar:
+#   - în branch-ul `rezultate` al repository-ului (ultima rulare);
+#   - ca fișier descărcabil („Artifacts") în pagina rulării.
+# Baza de date se păstrează între rulări, deci rularea zilnică interoghează
+# ANAF doar pentru firmele nou apărute.
+
+name: Colectare firme noi
+
+on:
+  workflow_dispatch:
+    inputs:
+      dupa:
+        description: "Firme înmatriculate după data (YYYY-MM-DD). Gol = 1 ianuarie anul curent."
+        required: false
+        default: ""
+      limit:
+        description: "Limită firme la ANAF (gol = toate; ex. 300 pentru un test rapid)"
+        required: false
+        default: ""
+      sursa:
+        description: "Sursa listei: anaf_scan (merge de pe GitHub) sau onrc (data.gov.ro, doar din România)"
+        required: false
+        default: "anaf_scan"
+      max_batches:
+        description: "anaf_scan: loturi de 100 CUI pe tranșă (restul continuă automat în rularea următoare)"
+        required: false
+        default: "1200"
+  schedule:
+    - cron: "23 4 * * *"   # zilnic, ~07:23 ora României
+  push:
+    paths: ["rulare.txt"]
+
+permissions:
+  contents: write
+  actions: write   # pentru pornirea automată a tranșei următoare
+
+concurrency:
+  group: colectare-firme
+  cancel-in-progress: false
+
+jobs:
+  colectare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Verificare repository privat
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          privat="$(gh api "repos/${GITHUB_REPOSITORY}" --jq .private)"
+          if [ "$privat" != "true" ]; then
+            echo "::error::Repository-ul este public. Rezultatele conțin date de contact; rulează workflow-ul doar într-un repository privat."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Instalare
+        run: pip install -r requirements.txt
+
+      - name: Parametri
+        run: |
+          DUPA="${{ inputs.dupa }}"
+          [ -z "$DUPA" ] && DUPA="$(date -u +%Y)-01-01"
+          echo "DUPA=$DUPA" >> "$GITHUB_ENV"
+          SURSA="${{ inputs.sursa }}"
+          [ -z "$SURSA" ] && SURSA="anaf_scan"
+          echo "SURSA=$SURSA" >> "$GITHUB_ENV"
+          MAX_BATCHES="${{ inputs.max_batches }}"
+          [ -z "$MAX_BATCHES" ] && MAX_BATCHES="1200"
+          echo "MAX_BATCHES=$MAX_BATCHES" >> "$GITHUB_ENV"
+          echo "LIMIT=${{ inputs.limit }}" >> "$GITHUB_ENV"
+          echo "AN=${DUPA:0:4}" >> "$GITHUB_ENV"
+
+      - name: Restaurare bază de date
+        uses: actions/cache/restore@v4
+        with:
+          path: data/firme.db
+          key: firme-db-${{ github.run_id }}
+          restore-keys: firme-db-
+
+      - name: Verificare acces ANAF
+        run: |
+          if [ "$SURSA" = "anaf_scan" ]; then python run.py probe --doar-anaf; else python run.py probe; fi
+
+      - name: Colectare firme noi
+        run: |
+          if [ "$SURSA" = "anaf_scan" ]; then
+            python run.py collect --source anaf_scan --dupa "$DUPA" --max-batches "$MAX_BATCHES"
+          else
+            python run.py collect --source "$SURSA" --dupa "$DUPA"
+          fi
+
+      - name: Îmbogățire ANAF (telefon, adresă, CAEN, TVA)
+        run: |
+          if [ -n "$LIMIT" ]; then python run.py enrich --limit "$LIMIT"; else python run.py enrich; fi
+
+      - name: Salvare bază de date
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/firme.db
+          key: firme-db-${{ github.run_id }}
+
+      - name: Verificare telefoane (numere false și comune)
+        run: python run.py verifica-telefoane
+
+      - name: Statistici
+        run: python run.py stats
+
+      - name: Stare scanare
+        id: stare
+        run: echo "status=$(cat data/scan_status.txt 2>/dev/null || echo complete)" >> "$GITHUB_OUTPUT"
+
+      # Exportul și publicarea se fac doar când scanarea e completă; tranșele
+      # intermediare doar colectează și pornesc tranșa următoare.
+      - name: Export pe ani
+        if: steps.stare.outputs.status != 'partial'
+        run: bash scripts/export_ani.sh
+
+      - name: Rezultate (artifact)
+        if: steps.stare.outputs.status != 'partial'
+        uses: actions/upload-artifact@v4
+        with:
+          name: firme-noi-${{ github.run_id }}
+          path: out/
+          retention-days: 30
+
+      - name: Rezultate (branch-uri private „rezultate" / „rezultate-AN")
+        if: steps.stare.outputs.status != 'partial'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/publica_rezultate.sh
+
+      - name: Continuă automat (dacă scanarea nu s-a terminat)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(cat data/scan_status.txt 2>/dev/null)" = "partial" ]; then
+            echo "Scanare parțială: pornesc tranșa următoare."
+            gh workflow run colectare.yml --ref "${GITHUB_REF_NAME}" \
+              -f dupa="$DUPA" -f sursa="$SURSA" -f max_batches="$MAX_BATCHES"
+          else
+            echo "Scanare completă."
+          fi

@@ -1,0 +1,9 @@
+# Exemplu de programare automată cu cron.
+# Instalează cu:  crontab -e   și adaugă linia de mai jos (ajustează calea).
+#
+# Rulează în fiecare zi la 07:30 dimineața:
+30 7 * * *  /cale/catre/firme-noi/scripts/run_daily.sh >> /cale/catre/firme-noi/data/cron.log 2>&1
+#
+# Fiecare rulare continuă scanarea ANAF de unde a rămas: interoghează doar
+# CUI-urile alocate de la rularea precedentă, fără duplicate (baza de date
+# ignoră automat firmele deja cunoscute).
