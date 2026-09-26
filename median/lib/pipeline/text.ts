@@ -241,7 +241,7 @@ const REGIONS: [RegionSlug, RegExp][] = [
   ["orientul-mijlociu", /\b(israel|gaza|hamas|hezbollah|liban|iran|teheran|siria|irak|yemen|houthi|saudit|netanyahu|cisiordani|palestin)/g],
   ["sua", /\b(sua\b|statele unite|washington|trump|casa alba|pentagon|congresul american|congresul sua|senatul american|new york|california|biden|vance|americani)/g],
   ["asia", /\b(china|beijing|taiwan|japoni|tokyo|coreea|phenian|seul|india\b|pakistan|afganistan|indonezi|vietnam|filipin)/g],
-  ["europa", /\b(ue\b|uniunea europeana|bruxelles|comisia europeana|parlamentul european|germani|berlin|franta|paris|macron|merz|itali|spani|polon|ungari|viktor orban|bulgari|serbi|grecia|austri|olanda|belgia|marea britanie|londra|europa\b|zona euro)/g],
+  ["europa", /\b(ue\b|uniunea europeana|bruxelles|comisia europeana|parlamentul european|germani|berlin|franta|paris|macron|merz|itali|spani|polon|ungari|viktor orban|bulgari|serbi|greci|atena|atenei|acropol|lisabona|portugalia|madrid|viena|varsovia|praga|cehi|slovaci|croati|norvegi|danemarca|finlanda|irlanda|elvetia|olandez|amsterdam|austri|olanda|belgia|marea britanie|londra|europa\b|zona euro)/g],
 ];
 
 /** Regiunea cu cele mai multe mențiuni distincte (nu prima găsită: o singură mențiune a Rusiei nu face o știre „Ucraina”). */

@@ -36,6 +36,27 @@ export function syncSources(list = SOURCES) {
      ON CONFLICT(id) DO UPDATE SET name = excluded.name, site = excluded.site, feed_url = excluded.feed_url,
        category = excluded.category, kind = excluded.kind, tier = excluded.tier`
   );
+  // Când o publicație primește al doilea flux, ID-ul primului se schimbă („gandul” → „gandul-national”):
+  // mutăm rândul existent (și referințele) pe noul ID, după adresa fluxului, ca istoricul să rămână.
+  const byUrl = d.prepare("SELECT id FROM sources WHERE feed_url = ?");
+  const renames = list
+    .map((s) => ({ from: (byUrl.get(s.url) as { id: string } | undefined)?.id, to: s.id }))
+    .filter((r): r is { from: string; to: string } => Boolean(r.from && r.from !== r.to));
+  if (renames.length) {
+    d.pragma("foreign_keys = OFF");
+    try {
+      d.transaction(() => {
+        for (const { from, to } of renames) {
+          for (const table of ["sources", "items", "images", "source_image_hashes", "source_image_items"]) {
+            const col = table === "sources" ? "id" : "source_id";
+            d.prepare(`UPDATE ${table} SET ${col} = ? WHERE ${col} = ?`).run(to, from);
+          }
+        }
+      })();
+    } finally {
+      d.pragma("foreign_keys = ON");
+    }
+  }
   d.transaction(() => {
     for (const s of list) upsert.run({ ...s, kind: s.kind ?? null });
   })();
@@ -257,10 +278,10 @@ export function refreshStory(storyId: string, now = Date.now()) {
   const d = db();
   const items = d
     .prepare(
-      `SELECT i.id, i.title, i.summary, i.category, i.published_at, i.duplicate_of, s.name, s.tier, s.id AS source_id
+      `SELECT i.id, i.title, i.summary, i.category, i.published_at, i.duplicate_of, s.name, s.tier, s.id AS source_id, s.site
        FROM items i JOIN sources s ON s.id = i.source_id WHERE i.story_id = ? ORDER BY i.published_at`
     )
-    .all(storyId) as { id: string; title: string; summary: string; category: CategorySlug; published_at: number; duplicate_of: string | null; name: string; tier: number; source_id: string }[];
+    .all(storyId) as { id: string; title: string; summary: string; category: CategorySlug; published_at: number; duplicate_of: string | null; name: string; tier: number; source_id: string; site: string }[];
   if (!items.length) return;
   const story = d.prepare("SELECT * FROM stories WHERE id = ?").get(storyId) as { category: CategorySlug; article_id: number | null; written_source_count: number; written_at: number | null; status: string };
 
@@ -294,7 +315,9 @@ export function refreshStory(storyId: string, now = Date.now()) {
   }
 
   const text = items.map((i) => i.title + " " + i.summary.slice(0, 400)).join(" ");
-  const region = category === "international" ? detectRegion(text) ?? "lume" : null;
+  // Știrile locale din presa de la Chișinău nu spun mereu „Moldova”: dacă toate vin de acolo, regiunea e R. Moldova.
+  const moldovan = items.every((i) => /\.md(\/|$)|moldova\.europalibera\.org|unimedia\.info/.test(i.site));
+  const region = category === "international" ? detectRegion(text) ?? (moldovan ? "moldova" : "lume") : null;
   const sensitive = detectSensitive(items.map((i) => i.title).join(" ")).join(",") || null;
 
   const first = items[0].published_at;
