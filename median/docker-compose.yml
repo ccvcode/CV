@@ -1,0 +1,63 @@
+# Median — pornire completă pe un server (VPS):
+#   1. copiază .env.example în .env și completează valorile
+#   2. docker compose up -d --build
+# Caddy obține automat certificatul HTTPS pentru domeniul din MEDIAN_DOMAIN.
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MEDIAN_DATA_DIR: /data
+    volumes:
+      - median-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  worker:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MEDIAN_DATA_DIR: /data
+    volumes:
+      - median-data:/data
+    command: ["npx", "tsx", "worker/index.ts"]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file: .env
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - median-data:/data/median:ro
+      - caddy-data:/data/caddy
+    depends_on:
+      - web
+
+  # Copie de siguranță zilnică a bazei de date (se păstrează ultimele 14).
+  backup:
+    image: keinos/sqlite3:latest
+    restart: unless-stopped
+    user: "0:0"
+    volumes:
+      - median-data:/data
+      - ./backups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          sqlite3 /data/median.db ".backup '/backups/median-$$(date +%F).db'" && ls -1t /backups/median-*.db | tail -n +15 | xargs -r rm -f
+          sleep 86400
+        done
+
+volumes:
+  median-data:
+  caddy-data:
