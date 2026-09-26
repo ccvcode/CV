@@ -1,18 +1,43 @@
-import dns from "dns/promises";
+import type dns from "dns";
+import dnsCb from "dns";
+import dnsP from "dns/promises";
+import ipaddr from "ipaddr.js";
 import net from "net";
-import { fetch as undiciFetch } from "undici";
+import { Agent, fetch as undiciFetch } from "undici";
 import { config } from "../core/config";
 
 /* ------------------------------------------------------------------ protecție SSRF */
 
-function isPrivateIp(ip: string): boolean {
-  if (net.isIPv4(ip)) {
-    const [a, b] = ip.split(".").map(Number);
-    return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
+/** Orice adresă care nu e „unicast public” (privată, loopback, link-local, IPv4 mapat/NAT64 spre acestea etc.). */
+export function isPrivateIp(ip: string): boolean {
+  try {
+    const addr = ipaddr.process(ip); // convertește ::ffff:a.b.c.d în IPv4
+    if (addr.kind() === "ipv6") {
+      const parts = (addr as ipaddr.IPv6).parts;
+      // ::a.b.c.d (IPv4-compatibil, învechit) și prefixele de traducere spre IPv4
+      if (parts.slice(0, 6).every((p) => p === 0)) return true;
+    }
+    return addr.range() !== "unicast";
+  } catch {
+    return true;
   }
-  const v = ip.toLowerCase();
-  if (v.startsWith("::ffff:")) return isPrivateIp(v.slice(7));
-  return v === "::1" || v === "::" || v.startsWith("fc") || v.startsWith("fd") || v.startsWith("fe80");
+}
+
+/** Rezolvare DNS care refuză adresele interne chiar în momentul conectării (previne „DNS rebinding”). */
+function safeLookup(hostname: string, options: dns.LookupOptions, callback: (err: NodeJS.ErrnoException | null, address: string | dns.LookupAddress[], family?: number) => void) {
+  dnsCb.lookup(hostname, { ...options, all: true }, (err, addresses) => {
+    if (err) return callback(err, "");
+    const list = addresses as dns.LookupAddress[];
+    if (!list.length || list.some((a) => isPrivateIp(a.address))) return callback(Object.assign(new Error("adresă internă refuzată"), { code: "EPRIVATE" }), "");
+    if (options.all) return callback(null, list);
+    callback(null, list[0].address, list[0].family);
+  });
+}
+
+let dispatcher: Agent | undefined;
+function publicDispatcher(): Agent | undefined {
+  if (config.demo || process.env.MEDIAN_ALLOW_PRIVATE === "1") return undefined;
+  return (dispatcher ??= new Agent({ connect: { lookup: safeLookup as never } }));
 }
 
 /**
@@ -26,7 +51,7 @@ export async function assertPublicUrl(raw: string): Promise<void> {
   if (config.demo || process.env.MEDIAN_ALLOW_PRIVATE === "1") return;
   const host = u.hostname.replace(/^\[|\]$/g, "");
   if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) throw new Error("adresă internă");
-  const addrs = net.isIP(host) ? [{ address: host }] : await dns.lookup(host, { all: true });
+  const addrs = net.isIP(host) ? [{ address: host }] : await dnsP.lookup(host, { all: true });
   if (addrs.some((a) => isPrivateIp(a.address))) throw new Error("adresă internă");
 }
 
@@ -108,7 +133,7 @@ async function safeFetch(url: string, init: { signal: AbortSignal; headers: Reco
   let current = url;
   for (let i = 0; i < 6; i++) {
     await assertPublicUrl(current);
-    const res = await undiciFetch(current, { ...init, redirect: "manual" });
+    const res = await undiciFetch(current, { ...init, redirect: "manual", dispatcher: publicDispatcher() });
     const loc = res.headers.get("location");
     if (res.status >= 300 && res.status < 400 && loc) {
       res.body?.cancel().catch(() => {});

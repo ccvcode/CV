@@ -83,7 +83,12 @@ export function docVector(title: string, lead: string): DocVector {
   add(title, 2);
   add(lead.slice(0, 400), 1);
   const numbers = new Set<string>();
-  for (const m of (title + " " + lead.slice(0, 400)).matchAll(/\d+(?:[.,]\d+)?/g)) if (m[0].length >= 2 || /[.,]/.test(m[0])) numbers.add(m[0].replace(",", "."));
+  // Doar cifrele distinctive confirmă (sume, procente cu zecimale, numere de ≥3 cifre), nu anii sau zilele.
+  for (const m of (title + " " + lead.slice(0, 400)).matchAll(/\d+(?:[.,]\d+)?/g)) {
+    const v = m[0];
+    if (/^(19|20)\d\d$/.test(v)) continue;
+    if (/[.,]/.test(v) || v.length >= 3) numbers.add(v.replace(",", "."));
+  }
   return { terms, entities: new Set([...entities(title), ...entities(lead.slice(0, 400))]), numbers };
 }
 
@@ -153,9 +158,9 @@ const REGIONS: [RegionSlug, RegExp][] = [
   ["ucraina", /\b(ucrain|kiev|kyiv|zelenski|zelensky|rusia|rusiei|rusesc|ruse\b|rusi\b|putin\b|kremlin|moscov|donbas|harkov|odesa|crimeea)/],
   ["moldova", /\b(moldov|chisinau|sandu|transnistr|gagauz)/],
   ["orientul-mijlociu", /\b(israel|gaza|hamas|hezbollah|liban|iran|teheran|siria|irak|yemen|houthi|saudit|netanyahu|cisiordani|palestin)/],
-  ["sua", /\b(sua\b|statele unite|washington|trump|casa alba|pentagon|congres|senatul american|new york|california|biden|vance|americani)/],
+  ["sua", /\b(sua\b|statele unite|washington|trump|casa alba|pentagon|congresul american|congresul sua|senatul american|new york|california|biden|vance|americani)/],
   ["asia", /\b(china|beijing|taiwan|japoni|tokyo|coreea|phenian|seul|india\b|pakistan|afganistan|indonezi|vietnam|filipin)/],
-  ["europa", /\b(ue\b|uniunea europeana|bruxelles|comisia europeana|parlamentul european|germani|berlin|franta|paris|macron|merz|itali|spani|polon|ungari|orban|bulgari|serbi|grecia|austri|olanda|belgia|marea britanie|londra|europa\b|zona euro)/],
+  ["europa", /\b(ue\b|uniunea europeana|bruxelles|comisia europeana|parlamentul european|germani|berlin|franta|paris|macron|merz|itali|spani|polon|ungari|viktor orban|bulgari|serbi|grecia|austri|olanda|belgia|marea britanie|londra|europa\b|zona euro)/],
 ];
 
 export function detectRegion(text: string): RegionSlug | undefined {
@@ -203,8 +208,9 @@ type CategorySlugLite = "politica" | "economie" | "sport" | "tech" | "sanatate" 
 export function classifyCategory(titles: string[], summaries: string[]): string | undefined {
   const t = fold(titles.join(" "));
   const s = fold(summaries.join(" ").slice(0, 3000));
-  // Știre externă: majoritatea titlurilor vorbesc despre alt stat/regiune.
-  const withRegion = titles.filter((x) => detectRegion(x)).length;
+  // Știre externă: majoritatea titlurilor vorbesc despre alt stat/regiune și nu despre politica internă.
+  const DOMESTIC = /\b(guvernul|guvern\b|parlament|senat\b|camera deputatilor|psd|pnl|usr|aur|udmr|primari|consiliul judetean|anaf)/;
+  const withRegion = titles.filter((x) => detectRegion(x) && !DOMESTIC.test(fold(x))).length;
   if (withRegion > 0 && withRegion * 2 >= titles.length) return "international";
   let best: { cat: string; score: number } | undefined;
   for (const [cat, re] of CATEGORY_RULES) {

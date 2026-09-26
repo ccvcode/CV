@@ -46,6 +46,7 @@ services:
   backup:
     image: keinos/sqlite3:latest
     restart: unless-stopped
+    user: "0:0"
     volumes:
       - median-data:/data
       - ./backups:/backups

@@ -15,10 +15,15 @@ export async function logout() {
 export async function approveArticle(formData: FormData) {
   await requireAdmin();
   const id = Number(formData.get("id"));
-  const a = db().prepare("SELECT story_id, headline, region FROM articles WHERE id = ?").get(id) as { story_id: string; headline: string; region: string | null } | undefined;
+  const a = db().prepare("SELECT story_id, headline, region FROM articles WHERE id = ? AND status = 'review'").get(id) as { story_id: string; headline: string; region: string | null } | undefined;
   if (!a) return;
   const story = db().prepare("SELECT category, sensitive FROM stories WHERE id = ?").get(a.story_id) as { category: string; sensitive: string | null };
-  publishArticle(a.story_id, id, a.headline, story.category, a.region, story.sensitive?.split(",").filter(Boolean) ?? []);
+  const ok = publishArticle(a.story_id, id, a.headline, story.category, a.region, story.sensitive?.split(",").filter(Boolean) ?? []);
+  if (!ok) {
+    logEvent("warn", `aprobarea nu a publicat „${a.headline}”: există deja o versiune mai nouă sau un articol complet`);
+    revalidatePath("/admin");
+    return;
+  }
   db().prepare("UPDATE articles SET review_reason = NULL WHERE id = ?").run(id);
   enqueue("image", `image:${a.story_id}:${id}`, { storyId: a.story_id }, { priority: 5 });
   logEvent("info", `articol aprobat manual: ${a.headline}`);
@@ -28,14 +33,14 @@ export async function approveArticle(formData: FormData) {
 export async function rejectArticle(formData: FormData) {
   await requireAdmin();
   const id = Number(formData.get("id"));
-  db().prepare("UPDATE articles SET status = 'rejected', updated_at = ? WHERE id = ?").run(Date.now(), id);
+  db().prepare("UPDATE articles SET status = 'rejected', updated_at = ? WHERE id = ? AND status = 'review'").run(Date.now(), id);
   revalidatePath("/admin");
 }
 
 export async function regenerateStory(formData: FormData) {
   await requireAdmin();
   const storyId = String(formData.get("storyId"));
-  enqueue("write", `write:${storyId}:manual:${Date.now()}`, { storyId }, { priority: 50 });
+  enqueue("write", `write:${storyId}`, { storyId, force: "1" }, { priority: 50, requeue: true });
   logEvent("info", `regenerare cerută manual pentru ${storyId}`);
   revalidatePath("/admin");
 }

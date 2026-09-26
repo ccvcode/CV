@@ -9,7 +9,7 @@ import { db, logEvent } from "../lib/core/db";
 import { SOURCES } from "../lib/core/sources";
 import type { Source } from "../lib/core/types";
 import { ingestDue, rescoreRecent, syncSources } from "../lib/pipeline/ingest";
-import { claim, complete, fail, postpone, pruneJobs, reclaimStale, type Job, type JobType } from "../lib/pipeline/jobs";
+import { claim, complete, fail, postpone, pruneJobs, reclaimStale, releaseAllRunning, type Job, type JobType } from "../lib/pipeline/jobs";
 import { fetchFullText } from "../lib/pipeline/fulltext";
 import { chooseHero } from "../lib/pipeline/images/hero";
 import { makeSourceThumb } from "../lib/pipeline/images/source";
@@ -21,7 +21,7 @@ type Handler = (payload: Record<string, string>) => Promise<unknown>;
 const HANDLERS: Record<JobType, Handler> = {
   thumb: (p) => makeSourceThumb(p.itemId),
   extract: (p) => fetchFullText(p.itemId),
-  write: (p) => writeStory(p.storyId),
+  write: (p) => writeStory(p.storyId, { force: p.force === "1" }),
   brief: (p) => writeBrief(p.storyId),
   image: (p) => chooseHero(p.storyId),
 };
@@ -80,6 +80,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export async function startWorker(sources: Source[] = SOURCES) {
   db();
+  releaseAllRunning();
   syncSources(sources);
   // Dezactivăm sursele care nu mai sunt în listă (fără a le șterge istoricul).
   db()

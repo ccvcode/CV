@@ -8,11 +8,14 @@ import { enqueue } from "./jobs";
 import { assertBudget, chatJson, recordOutput } from "./llm";
 import {
   ArticleSchema,
+  ArticleShape,
   BRIEF_SYSTEM,
   BriefSchema,
+  BriefShape,
   formatSources,
   VERIFY_SYSTEM,
   VerifySchema,
+  VerifyShape,
   WRITER_SYSTEM,
   type ArticleDraft,
   type PromptSource,
@@ -87,12 +90,19 @@ function sourceRefs(list: StoryItem[]): ArticleSourceRef[] {
 
 export type WriteOutcome = "published" | "review" | "brief" | "skipped";
 
-export async function writeStory(storyId: string): Promise<WriteOutcome> {
+export async function writeStory(storyId: string, opts: { force?: boolean } = {}): Promise<WriteOutcome> {
   const d = db();
   const story = d.prepare("SELECT * FROM stories WHERE id = ?").get(storyId) as
-    | { id: string; status: string; sensitive: string | null; source_count: number; article_id: number | null; category: CategorySlug }
+    | { id: string; status: string; sensitive: string | null; source_count: number; article_id: number | null; category: CategorySlug; written_source_count: number }
     | undefined;
   if (!story || story.status !== "active") return "skipped";
+  // Reverificăm: între programare și rulare, alt job poate să fi scris deja articolul.
+  if (!opts.force) {
+    const existing = d.prepare("SELECT kind FROM articles WHERE story_id = ? AND status IN ('published','review') ORDER BY version DESC LIMIT 1").get(storyId) as
+      | { kind: string }
+      | undefined;
+    if (existing?.kind === "full" && story.source_count < story.written_source_count + 2) return "skipped";
+  }
 
   const items = storyItems(storyId);
   // Ne asigurăm că avem textul complet (jobul de extragere poate să nu fi rulat încă).
@@ -130,6 +140,7 @@ export async function writeStory(storyId: string): Promise<WriteOutcome> {
       system: WRITER_SYSTEM,
       user: user + feedback,
       schema: ArticleSchema,
+      shape: ArticleShape,
       schemaName: "articol",
       maxTokens: 6000,
     });
@@ -145,6 +156,8 @@ export async function writeStory(storyId: string): Promise<WriteOutcome> {
       quotes: draft.quotes,
       tags: draft.tags,
       sources: sourceTexts,
+      outlets: chosen.map((c) => c.source_name),
+      dates: chosen.map((c) => c.published_at),
       minWords: 220,
       maxCopiedWords: config.demo ? 100000 : 14,
     });
@@ -156,6 +169,7 @@ export async function writeStory(storyId: string): Promise<WriteOutcome> {
         system: VERIFY_SYSTEM,
         user: `SURSE:\n\n${formatSources(sources)}\n\nARTICOL:\n${JSON.stringify({ headline: draft.headline, dek: draft.dek, key_points: draft.key_points, sections: draft.sections, why_it_matters: draft.why_it_matters, context: draft.context, quotes: draft.quotes })}`,
         schema: VerifySchema,
+        shape: VerifyShape,
         schemaName: "verificare",
         maxTokens: 1500,
         temperature: 0,
@@ -163,7 +177,8 @@ export async function writeStory(storyId: string): Promise<WriteOutcome> {
       usageIn += v.tokensIn;
       usageOut += v.tokensOut;
       cost += v.costUsd;
-      aiIssues = v.data.ok ? [] : v.data.issues;
+      // „ok: false” fără detalii contează tot ca problemă (nu trecem articolul pe tăcute).
+      aiIssues = v.data.ok && !v.data.issues.length ? [] : v.data.issues.length ? v.data.issues : [{ type: "verificare", text: "", detail: "verificatorul a respins articolul fără detalii" }];
     }
     if (!codeIssues.length && !aiIssues.length) break;
     feedback =
@@ -294,18 +309,41 @@ function saveArticle(a: {
   return articleId;
 }
 
-/** Face vizibil un articol (folosit și de butonul „Aprobă” din /admin). */
-export function publishArticle(storyId: string, articleId: number, headline: string, category: string, region: string | null, sensitive: string[] = []) {
+/**
+ * Face vizibil un articol (folosit și de butonul „Aprobă” din /admin). Nu permite ca o știre scurtă
+ * să înlocuiască un articol complet sau ca o versiune mai veche să înlocuiască una mai nouă;
+ * în aceste cazuri articolul e marcat „superseded” și funcția întoarce false.
+ */
+export function publishArticle(storyId: string, articleId: number, headline: string, category: string, region: string | null, sensitive: string[] = []): boolean {
   const d = db();
-  const story = d.prepare("SELECT slug, article_id FROM stories WHERE id = ?").get(storyId) as { slug: string; article_id: number | null };
-  d.prepare("UPDATE articles SET status = 'published', published_at = COALESCE(published_at, ?), updated_at = ? WHERE id = ?").run(Date.now(), Date.now(), articleId);
-  d.prepare(
-    `UPDATE stories SET article_id = ?, title = ?, slug = ?, category = ?, region = COALESCE(?, region), sensitive = ? WHERE id = ?`
-  ).run(articleId, headline, story.article_id ? story.slug : slugify(headline, 80), category, category === "international" ? region ?? "lume" : null, sensitive.join(",") || null, storyId);
-  const a = d.prepare("SELECT dek, sections FROM articles WHERE id = ?").get(articleId) as { dek: string; sections: string };
-  const body = [a.dek, ...(JSON.parse(a.sections) as ArticleSection[]).flatMap((s) => s.paragraphs)].join(" ");
-  d.prepare("DELETE FROM search WHERE story_id = ?").run(storyId);
-  d.prepare("INSERT INTO search(story_id, title, body) VALUES (?, ?, ?)").run(storyId, headline, body);
+  return d.transaction(() => {
+    const story = d.prepare("SELECT slug, article_id FROM stories WHERE id = ?").get(storyId) as { slug: string; article_id: number | null };
+    const next = d.prepare("SELECT kind, version FROM articles WHERE id = ?").get(articleId) as { kind: string; version: number };
+    const cur = story.article_id ? (d.prepare("SELECT kind, version FROM articles WHERE id = ? AND status = 'published'").get(story.article_id) as { kind: string; version: number } | undefined) : undefined;
+    if (cur && ((cur.kind === "full" && next.kind === "brief") || cur.version > next.version)) {
+      d.prepare("UPDATE articles SET status = 'superseded', updated_at = ? WHERE id = ?").run(Date.now(), articleId);
+      return false;
+    }
+    d.prepare("UPDATE articles SET status = 'published', published_at = COALESCE(published_at, ?), updated_at = ? WHERE id = ?").run(Date.now(), Date.now(), articleId);
+    // Versiunile anterioare aflate la aprobare nu mai sunt relevante.
+    d.prepare("UPDATE articles SET status = 'superseded' WHERE story_id = ? AND id != ? AND status = 'review' AND version < ?").run(storyId, articleId, next.version);
+    d.prepare(
+      `UPDATE stories SET article_id = ?, title = ?, slug = ?, category = ?, region = ?, sensitive = ? WHERE id = ?`
+    ).run(
+      articleId,
+      headline,
+      cur ? story.slug : slugify(headline, 80),
+      category,
+      category === "international" ? region ?? "lume" : null,
+      sensitive.join(",") || null,
+      storyId
+    );
+    const a = d.prepare("SELECT dek, sections FROM articles WHERE id = ?").get(articleId) as { dek: string; sections: string };
+    const body = [a.dek, ...(JSON.parse(a.sections) as ArticleSection[]).flatMap((s) => s.paragraphs)].join(" ");
+    d.prepare("DELETE FROM search WHERE story_id = ?").run(storyId);
+    d.prepare("INSERT INTO search(story_id, title, body) VALUES (?, ?, ?)").run(storyId, headline, body);
+    return true;
+  })();
 }
 
 /* ------------------------------------------------------------------ știre scurtă */
@@ -341,6 +379,7 @@ export async function writeBrief(storyId: string): Promise<boolean> {
     system: BRIEF_SYSTEM,
     user: `Categoria preliminară: ${story.category}\n\nSURSA:\n\n${formatSources(src)}\n\nScrie știrea scurtă în formatul JSON cerut.`,
     schema: BriefSchema,
+    shape: BriefShape,
     schemaName: "stire_scurta",
     maxTokens: 900,
   });
@@ -353,6 +392,8 @@ export async function writeBrief(storyId: string): Promise<boolean> {
     quotes: [],
     tags: b.tags,
     sources: [src[0].title + "\n" + src[0].text],
+    outlets: [it.source_name],
+    dates: [it.published_at],
     maxCopiedWords: config.demo ? 100000 : 12,
   });
   const sensitive = [...new Set([...(story.sensitive?.split(",").filter(Boolean) ?? []), ...b.sensitive])];

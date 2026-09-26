@@ -39,6 +39,10 @@ export function checkAgainstSources(opts: {
   quotes: { text: string }[];
   tags?: string[];
   sources: string[];
+  /** Numele publicațiilor (ex. „Digi24”, „0-100.ro”): cifrele din nume nu sunt date factuale. */
+  outlets?: string[];
+  /** Momentele publicării surselor: zilele, anii și orele lor sunt permise în text. */
+  dates?: number[];
   minWords?: number;
   maxCopiedWords?: number;
 }): CodeIssue[] {
@@ -56,8 +60,17 @@ export function checkAgainstSources(opts: {
 
   // 2. Cifrele: fiecare număr din text trebuie să apară în surse (1–12 sunt tolerate: pot fi scrise în litere în sursă).
   const srcNumbers = new Set(opts.sources.flatMap(numbersIn));
+  for (const ts of opts.dates ?? []) {
+    const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Bucharest", day: "numeric", month: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(ts);
+    for (const part of p) if (/^\d+$/.test(part.value)) srcNumbers.add(String(Number(part.value))).add(part.value);
+    const y = new Date(ts).getUTCFullYear();
+    srcNumbers.add(String(y - 1)).add(String(y + 1));
+  }
+  // Numele publicațiilor sunt eliminate înainte de extragerea cifrelor („potrivit Digi24”).
+  let numText = opts.text;
+  for (const o of opts.outlets ?? []) if (/\d/.test(o)) numText = numText.split(o).join(" ");
   const seen = new Set<string>();
-  for (const n of numbersIn(opts.text)) {
+  for (const n of numbersIn(numText)) {
     if (seen.has(n)) continue;
     seen.add(n);
     const v = Number(n);

@@ -89,6 +89,8 @@ export async function chatJson<S extends z.ZodTypeAny>(opts: {
   system: string;
   user: string;
   schema: S;
+  /** Forma strictă pentru modul json_schema (implicit: derivată din `schema`). */
+  shape?: z.ZodTypeAny;
   schemaName: string;
   maxTokens?: number;
   temperature?: number;
@@ -114,7 +116,7 @@ export async function chatJson<S extends z.ZodTypeAny>(opts: {
 
 async function rawChat(
   ep: ReturnType<typeof endpoint>,
-  opts: { system: string; schema: z.ZodTypeAny; schemaName: string; maxTokens?: number; temperature?: number; target: Target },
+  opts: { system: string; schema: z.ZodTypeAny; shape?: z.ZodTypeAny; schemaName: string; maxTokens?: number; temperature?: number; target: Target },
   user: string
 ): Promise<{ content: string; model: string; tokensIn: number; tokensOut: number }> {
   if (ep.baseUrl === "mock") return mockChat(opts.target, opts.schemaName, opts.system, user);
@@ -132,11 +134,16 @@ async function rawChat(
   };
   if (config.llm.jsonMode === "json_object") body.response_format = { type: "json_object" };
   else if (config.llm.jsonMode === "json_schema")
-    body.response_format = { type: "json_schema", json_schema: { name: opts.schemaName, strict: true, schema: z.toJSONSchema(opts.schema) } };
+    body.response_format = {
+      type: "json_schema",
+      json_schema: { name: opts.schemaName, strict: true, schema: opts.shape ? z.toJSONSchema(opts.shape) : z.toJSONSchema(opts.schema, { io: "input", unrepresentable: "any" }) },
+    };
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), config.llm.timeoutMs);
   let res: Awaited<ReturnType<typeof undiciFetch>>;
+  let text: string;
+  // Timeout-ul acoperă și citirea corpului răspunsului (unele API-uri trimit spații de „keep-alive”).
   try {
     res = await undiciFetch(chatUrl(ep.baseUrl), {
       method: "POST",
@@ -144,23 +151,26 @@ async function rawChat(
       headers: { "content-type": "application/json", ...(ep.apiKey ? { authorization: `Bearer ${ep.apiKey}` } : {}) },
       body: JSON.stringify(body),
     });
+    text = await res.text();
   } catch (e) {
+    throw new LlmError(`conexiune eșuată sau timeout: ${(e as Error).message}`, true);
+  } finally {
     clearTimeout(timer);
-    throw new LlmError(`conexiune eșuată: ${(e as Error).message}`, true);
   }
-  clearTimeout(timer);
-  const text = await res.text();
   if (!res.ok) {
     const retryable = res.status === 429 || res.status >= 500;
     throw new LlmError(`HTTP ${res.status}: ${text.slice(0, 300)}`, retryable);
   }
-  let data: { choices?: { message?: { content?: string } }[]; usage?: { prompt_tokens?: number; completion_tokens?: number }; model?: string };
+  let data: { choices?: { message?: { content?: string }; finish_reason?: string }[]; usage?: { prompt_tokens?: number; completion_tokens?: number }; model?: string };
   try {
     data = JSON.parse(text);
   } catch {
     throw new LlmError("răspuns invalid de la API", true);
   }
   const content = data.choices?.[0]?.message?.content ?? "";
+  const finish = data.choices?.[0]?.finish_reason;
+  if (finish === "length") throw new LlmError("răspuns trunchiat (max_tokens atins)", true);
+  if (finish === "content_filter") throw new LlmError("răspuns blocat de filtrul de conținut al modelului", false);
   if (!content.trim()) throw new LlmError("răspuns gol de la model", true);
   return {
     content,

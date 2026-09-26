@@ -7,34 +7,60 @@ export const SENSITIVE_TAGS = ["deces", "sinucidere", "minori", "viol", "justiti
 
 /* ------------------------------------------------------------------ articol complet */
 
+/*
+ * Schemele sunt tolerante: depășirile de lungime sunt trunchiate, numerele date ca text sunt convertite,
+ * valorile lipsă primesc valori implicite — un model care greșește un detaliu minor nu irosește un apel.
+ */
+const str = (max: number) => z.string().catch("").transform((s) => s.slice(0, max));
+const list = <T extends z.ZodTypeAny>(item: T, max: number) =>
+  z
+    .array(z.unknown())
+    .catch([])
+    .transform((arr) => arr.map((x) => item.safeParse(x)).filter((r) => r.success).map((r) => r.data as z.infer<T>).slice(0, max));
+const num = z.coerce.number().int().catch(0);
+
 export const ArticleSchema = z.object({
-  status: z.enum(["ok", "insuficient"]),
-  headline: z.string().max(160).default(""),
-  dek: z.string().max(400).default(""),
+  status: z.enum(["ok", "insuficient"]).catch("ok"),
+  headline: str(160).default(""),
+  dek: str(400).default(""),
   category: z.enum(CATEGORY_SLUGS).catch("national"),
   region: z.enum(REGION_SLUGS).nullable().catch(null).default(null),
-  key_points: z.array(z.string().max(300)).max(6).default([]),
-  sections: z
-    .array(
-      z.object({
-        heading: z.string().max(120).nullable().default(null),
-        paragraphs: z.array(z.object({ text: z.string(), sources: z.array(z.number().int()).default([]) })).default([]),
-      })
-    )
-    .max(8)
-    .default([]),
-  why_it_matters: z.string().max(700).default(""),
-  context: z.string().max(1200).default(""),
-  quotes: z.array(z.object({ text: z.string(), speaker: z.string(), source: z.number().int() })).max(6).default([]),
-  tags: z.array(z.string().max(60)).max(8).default([]),
-  entities: z
-    .array(z.object({ name: z.string(), type: z.enum(["persoana", "organizatie", "loc", "eveniment"]).catch("organizatie") }))
-    .max(10)
-    .default([]),
-  image_query: z.string().max(80).default(""),
-  sensitive: z.array(z.string()).default([]),
+  key_points: list(z.string(), 6).default([]),
+  sections: list(
+    z.object({
+      heading: z.string().nullable().catch(null).default(null).transform((h) => (h ? h.slice(0, 120) : null)),
+      paragraphs: list(z.union([z.object({ text: z.string(), sources: list(num, 6).default([]) }), z.string().transform((text) => ({ text, sources: [] as number[] }))]), 12).default([]),
+    }),
+    8
+  ).default([]),
+  why_it_matters: str(700).default(""),
+  context: str(1200).default(""),
+  quotes: list(z.object({ text: z.string(), speaker: str(120).default(""), source: num.default(0) }), 6).default([]),
+  tags: list(z.string().transform((t) => t.slice(0, 60)), 8).default([]),
+  entities: list(z.object({ name: z.string(), type: z.enum(["persoana", "organizatie", "loc", "eveniment"]).catch("organizatie") }), 10).default([]),
+  image_query: str(80).default(""),
+  sensitive: list(z.string(), 8).default([]),
 });
 export type ArticleDraft = z.infer<typeof ArticleSchema>;
+
+/** Forma strictă (fără transformări), trimisă modelului în modul „json_schema” (Ollama, llama.cpp, Scaleway). */
+const Entity = z.object({ name: z.string(), type: z.enum(["persoana", "organizatie", "loc", "eveniment"]) });
+export const ArticleShape = z.object({
+  status: z.enum(["ok", "insuficient"]),
+  headline: z.string(),
+  dek: z.string(),
+  category: z.enum(CATEGORY_SLUGS),
+  region: z.enum(REGION_SLUGS).nullable(),
+  key_points: z.array(z.string()),
+  sections: z.array(z.object({ heading: z.string().nullable(), paragraphs: z.array(z.object({ text: z.string(), sources: z.array(z.number().int()) })) })),
+  why_it_matters: z.string(),
+  context: z.string(),
+  quotes: z.array(z.object({ text: z.string(), speaker: z.string(), source: z.number().int() })),
+  tags: z.array(z.string()),
+  entities: z.array(Entity),
+  image_query: z.string(),
+  sensitive: z.array(z.string()),
+});
 
 export const WRITER_SYSTEM = `Ești redactor la Median, o redacție digitală românească. Primești textele mai multor publicații despre ACELAȘI subiect și scrii un articol ORIGINAL, complet, în limba română, care sintetizează faptele din toate sursele.
 
@@ -70,7 +96,7 @@ Răspunde DOAR cu un obiect JSON valid, fără alt text. Exemplu de formă:
 /* ------------------------------------------------------------------ verificare */
 
 export const VerifySchema = z.object({
-  ok: z.boolean(),
+  ok: z.boolean().catch(false),
   issues: z
     .array(
       z.object({
@@ -82,6 +108,8 @@ export const VerifySchema = z.object({
     .default([]),
 });
 export type VerifyResult = z.infer<typeof VerifySchema>;
+
+export const VerifyShape = z.object({ ok: z.boolean(), issues: z.array(z.object({ type: z.string(), text: z.string(), detail: z.string() })) });
 
 export const VERIFY_SYSTEM = `Ești verificator de fapte (fact-checker) la o redacție românească. Primești SURSELE și un ARTICOL generat automat pe baza lor. Verifică fiecare afirmație din articol față de surse.
 
@@ -98,20 +126,29 @@ Răspunde DOAR cu JSON: {"ok": true|false, "issues": [{"type":"nesustinut","text
 /* ------------------------------------------------------------------ știre scurtă (o singură sursă) */
 
 export const BriefSchema = z.object({
-  status: z.enum(["ok", "insuficient"]),
-  headline: z.string().max(160).default(""),
-  summary: z.string().max(700).default(""),
+  status: z.enum(["ok", "insuficient"]).catch("ok"),
+  headline: str(160).default(""),
+  summary: str(700).default(""),
   category: z.enum(CATEGORY_SLUGS).catch("national"),
   region: z.enum(REGION_SLUGS).nullable().catch(null).default(null),
-  tags: z.array(z.string().max(60)).max(6).default([]),
-  entities: z
-    .array(z.object({ name: z.string(), type: z.enum(["persoana", "organizatie", "loc", "eveniment"]).catch("organizatie") }))
-    .max(6)
-    .default([]),
-  image_query: z.string().max(80).default(""),
-  sensitive: z.array(z.string()).default([]),
+  tags: list(z.string().transform((t) => t.slice(0, 60)), 6).default([]),
+  entities: list(z.object({ name: z.string(), type: z.enum(["persoana", "organizatie", "loc", "eveniment"]).catch("organizatie") }), 6).default([]),
+  image_query: str(80).default(""),
+  sensitive: list(z.string(), 8).default([]),
 });
 export type BriefDraft = z.infer<typeof BriefSchema>;
+
+export const BriefShape = z.object({
+  status: z.enum(["ok", "insuficient"]),
+  headline: z.string(),
+  summary: z.string(),
+  category: z.enum(CATEGORY_SLUGS),
+  region: z.enum(REGION_SLUGS).nullable(),
+  tags: z.array(z.string()),
+  entities: z.array(Entity),
+  image_query: z.string(),
+  sensitive: z.array(z.string()),
+});
 
 export const BRIEF_SYSTEM = `Ești redactor la Median. Primești o singură știre publicată de o altă publicație și scrii o ȘTIRE SCURTĂ originală în română, care o semnalează cititorilor și trimite la sursă.
 

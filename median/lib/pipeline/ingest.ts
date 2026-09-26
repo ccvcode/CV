@@ -251,7 +251,7 @@ export function refreshStory(storyId: string, now = Date.now()) {
   const last = items[items.length - 1].published_at;
   const recentHour = items.filter((i) => now - i.published_at < 3600_000).length;
   const ageH = Math.max(0, (now - last) / 3600_000);
-  const score = (2.2 * Math.log(1 + sourceCount) + 0.6 * tier1 + 0.4 * Math.min(recentHour, 5) + 0.5) / Math.pow(ageH + 2, 1.5);
+  const score = storyScore(sourceCount, tier1, recentHour, ageH);
 
   // Titlul de lucru: al publicației cu cel mai înalt nivel, cea mai veche (până la articolul AI).
   const lead = [...items].sort((a, b) => a.tier - b.tier || a.published_at - b.published_at)[0];
@@ -271,35 +271,40 @@ export function refreshStory(storyId: string, now = Date.now()) {
   if (story.status !== "active") return;
   // Miniaturi pentru fiecare articol-sursă (poza publicației, afișată mic, cu credit).
   for (const it of items) enqueue("thumb", `thumb:${it.id}`, { itemId: it.id }, { priority: 1 });
-  // Articol complet când subiectul are ≥2 publicații; se rescrie când apar ≥2 surse noi (max. o dată pe 30 min).
-  if (!llmEnabled()) {
-    // Fără AI: site-ul funcționează ca agregator; subiectele cu mai multe surse primesc o imagine principală.
-    if (sourceCount >= 2) enqueue("image", `image:${storyId}:raw`, { storyId }, { priority: 1, delayMs: 20_000 });
-    return;
-  }
-  const due = sourceCount >= 2 && (!story.article_id || (sourceCount >= story.written_source_count + 2 && now - (story.written_at ?? 0) > 30 * 60_000));
+  // Există deja un articol (publicat sau la aprobare)? Atunci rescriem doar când apar ≥2 surse noi.
+  const existing = d
+    .prepare("SELECT kind FROM articles WHERE story_id = ? AND status IN ('published','review') ORDER BY version DESC LIMIT 1")
+    .get(storyId) as { kind: string } | undefined;
+  const hasFull = existing?.kind === "full";
+  const due =
+    sourceCount >= 2 &&
+    (!hasFull || (sourceCount >= story.written_source_count + 2 && now - (story.written_at ?? 0) > 30 * 60_000));
   if (due) {
     for (const it of items) enqueue("extract", `extract:${it.id}`, { itemId: it.id }, { priority: 2 });
-    enqueue("write", `write:${storyId}:${sourceCount}`, { storyId }, { priority: Math.round(score * 10), delayMs: 60_000 });
-  } else if (sourceCount === 1 && !story.article_id) {
+    enqueue("write", `write:${storyId}`, { storyId }, { priority: Math.round(score * 10), delayMs: 60_000, requeue: true });
+  } else if (sourceCount === 1 && !existing) {
     enqueue("brief", `brief:${storyId}`, { storyId }, { priority: Math.round(score * 10), delayMs: 30_000 });
   }
 }
 
-/** Recalculează scorurile tuturor subiectelor recente (scorul scade odată cu vârsta). */
+export function storyScore(sourceCount: number, tier1: number, recentHour: number, ageH: number): number {
+  return (2.2 * Math.log(1 + sourceCount) + 0.6 * tier1 + 0.4 * Math.min(recentHour, 5) + 0.5) / Math.pow(ageH + 2, 1.5);
+}
+
+/** Recalculează scorurile subiectelor recente (scorul scade odată cu vârsta), cu aceeași formulă. */
 export function rescoreRecent(now = Date.now()) {
   const d = db();
-  const rows = d.prepare("SELECT id, source_count, last_published_at, score FROM stories WHERE last_published_at > ?").all(now - 3 * 86400_000) as {
-    id: string;
-    source_count: number;
-    last_published_at: number;
-  }[];
+  const rows = d
+    .prepare(
+      `SELECT st.id, st.source_count, st.last_published_at,
+              COUNT(DISTINCT CASE WHEN s.tier = 1 AND i.duplicate_of IS NULL THEN s.name END) AS tier1,
+              SUM(CASE WHEN i.published_at > @hour THEN 1 ELSE 0 END) AS recent
+       FROM stories st JOIN items i ON i.story_id = st.id JOIN sources s ON s.id = i.source_id
+       WHERE st.last_published_at > @since GROUP BY st.id`
+    )
+    .all({ since: now - 3 * 86400_000, hour: now - 3600_000 }) as { id: string; source_count: number; last_published_at: number; tier1: number; recent: number }[];
   const upd = d.prepare("UPDATE stories SET score = ? WHERE id = ?");
   d.transaction(() => {
-    for (const r of rows) {
-      const ageH = Math.max(0, (now - r.last_published_at) / 3600_000);
-      const tierBonus = 0; // bonusul de nivel se aplică la actualizarea completă a subiectului
-      upd.run((2.2 * Math.log(1 + r.source_count) + tierBonus + 0.5) / Math.pow(ageH + 2, 1.5), r.id);
-    }
+    for (const r of rows) upd.run(storyScore(r.source_count, r.tier1, r.recent, Math.max(0, (now - r.last_published_at) / 3600_000)), r.id);
   })();
 }

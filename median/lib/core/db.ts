@@ -209,6 +209,16 @@ const MIGRATIONS: string[] = [
     created_at INTEGER NOT NULL
   );
   `,
+  // 3 — pozele „implicite” se numără pe articole distincte (nu pe procesări repetate)
+  `
+  CREATE TABLE source_image_items (
+    source_id TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (source_id, hash, item_id)
+  );
+  `,
 ];
 
 type DB = Database.Database;
@@ -228,13 +238,14 @@ export function db(): DB {
 }
 
 function migrate(d: DB) {
-  const version = d.pragma("user_version", { simple: true }) as number;
-  for (let i = version; i < MIGRATIONS.length; i++) {
-    d.transaction(() => {
+  // IMMEDIATE: site-ul și worker-ul pot porni simultan pe o bază nouă; doar unul aplică migrațiile.
+  d.transaction(() => {
+    const version = d.pragma("user_version", { simple: true }) as number;
+    for (let i = version; i < MIGRATIONS.length; i++) {
       d.exec(MIGRATIONS[i]);
       d.pragma(`user_version = ${i + 1}`);
-    })();
-  }
+    }
+  }).immediate();
 }
 
 /** Închide conexiunea (folosit în teste). */

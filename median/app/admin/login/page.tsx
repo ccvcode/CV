@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { adminEnabled, checkPassword, createSession } from "@/lib/admin/auth";
 
 export const metadata: Metadata = { title: "Autentificare", robots: { index: false } };
@@ -9,10 +10,16 @@ const attempts = new Map<string, number[]>();
 async function login(formData: FormData) {
   "use server";
   const now = Date.now();
-  const recent = (attempts.get("all") ?? []).filter((t) => t > now - 15 * 60_000);
+  const h = await headers();
+  const ip = (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || h.get("x-real-ip") || "necunoscut";
+  const recent = (attempts.get(ip) ?? []).filter((t) => t > now - 15 * 60_000);
+  // Limită per IP: 10 încercări greșite în 15 minute. O parolă corectă nu e blocată de încercările altora.
   if (recent.length >= 10) redirect("/admin/login?e=limit");
-  attempts.set("all", [...recent, now]);
-  if (!checkPassword(String(formData.get("password") ?? ""))) redirect("/admin/login?e=1");
+  if (!checkPassword(String(formData.get("password") ?? ""))) {
+    if (attempts.size > 10_000) attempts.clear();
+    attempts.set(ip, [...recent, now]);
+    redirect("/admin/login?e=1");
+  }
   await createSession();
   redirect("/admin");
 }

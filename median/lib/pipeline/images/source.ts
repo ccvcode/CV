@@ -2,7 +2,7 @@ import probe from "probe-image-size";
 import { config } from "../../core/config";
 import { db } from "../../core/db";
 import type { ImageCandidate } from "../../core/types";
-import { assertPublicUrl, httpGetBuffer } from "../http";
+import { httpGetBuffer } from "../http";
 import { processImage, saveImageRow, type Processed } from "./store";
 
 const REJECT_URL = /(logo|favicon|placeholder|default[-_]?(image|img|share|og)?|avatar|sprite|pixel|1x1|spacer|blank|\/ads?\/|banner|share-default|no-image|noimage|icon)/i;
@@ -14,8 +14,10 @@ export interface ScoredCandidate extends ImageCandidate {
 /** Citește doar antetul fișierului pentru a afla dimensiunile (fără a descărca toată imaginea). */
 async function probeSize(url: string, referer: string): Promise<{ width: number; height: number; type: string } | undefined> {
   try {
-    await assertPublicUrl(url);
-    const r = await probe(url, { timeout: 6000, headers: { "user-agent": config.userAgent, referer } });
+    // Descărcăm doar începutul fișierului, prin clientul HTTP protejat (fără redirecționări necontrolate).
+    const { buffer } = await httpGetBuffer(url, { referer, maxBytes: 256_000, timeoutMs: 6000 });
+    const r = probe.sync(buffer);
+    if (!r) return undefined;
     return { width: r.width, height: r.height, type: r.type };
   } catch {
     return undefined;
@@ -57,25 +59,21 @@ export async function rankCandidates(candidates: ImageCandidate[], referer: stri
   return out.sort((a, b) => b.score - a.score);
 }
 
-/** O imagine care apare la ≥3 articole diferite ale aceleiași surse este considerată „implicită” (logo/generic). */
-function isDefaultImage(sourceId: string, ahash: string, url: string): boolean {
+/** O imagine care apare la ≥3 articole DIFERITE ale aceleiași surse este considerată „implicită” (logo/generic). */
+function isDefaultImage(sourceId: string, itemId: string, ahash: string, url: string): boolean {
   const d = db();
   const now = Date.now();
-  for (const h of [ahash, "url:" + url]) {
-    d.prepare(
-      `INSERT INTO source_image_hashes(source_id, hash, seen, first_at, last_at) VALUES (?, ?, 1, ?, ?)
-       ON CONFLICT(source_id, hash) DO UPDATE SET seen = seen + 1, last_at = excluded.last_at`
-    ).run(sourceId, h, now, now);
-  }
+  const ins = d.prepare("INSERT OR IGNORE INTO source_image_items(source_id, hash, item_id, at) VALUES (?, ?, ?, ?)");
+  for (const h of [ahash, "url:" + url]) ins.run(sourceId, h, itemId, now);
   const row = d
-    .prepare("SELECT MAX(seen) AS seen FROM source_image_hashes WHERE source_id = ? AND hash IN (?, ?) AND last_at > ?")
-    .get(sourceId, ahash, "url:" + url, now - 30 * 86400_000) as { seen: number | null };
-  return (row.seen ?? 0) >= 3;
+    .prepare("SELECT MAX(n) AS n FROM (SELECT COUNT(DISTINCT item_id) AS n FROM source_image_items WHERE source_id = ? AND hash IN (?, ?) AND at > ? GROUP BY hash)")
+    .get(sourceId, ahash, "url:" + url, now - 30 * 86400_000) as { n: number | null };
+  return (row.n ?? 0) >= 3;
 }
 
 export function knownDefault(sourceId: string, url: string): boolean {
-  const row = db().prepare("SELECT seen FROM source_image_hashes WHERE source_id = ? AND hash = ?").get(sourceId, "url:" + url) as { seen: number } | undefined;
-  return (row?.seen ?? 0) >= 3;
+  const row = db().prepare("SELECT COUNT(DISTINCT item_id) AS n FROM source_image_items WHERE source_id = ? AND hash = ?").get(sourceId, "url:" + url) as { n: number };
+  return row.n >= 3;
 }
 
 /**
@@ -85,9 +83,10 @@ export function knownDefault(sourceId: string, url: string): boolean {
 export async function makeSourceThumb(itemId: string): Promise<number | null> {
   const d = db();
   const item = d
-    .prepare("SELECT i.id, i.url, i.image_candidates, i.source_id, s.name, s.hero_images FROM items i JOIN sources s ON s.id = i.source_id WHERE i.id = ?")
-    .get(itemId) as { id: string; url: string; image_candidates: string; source_id: string; name: string; hero_images: number } | undefined;
+    .prepare("SELECT i.id, i.url, i.image_candidates, i.source_id, i.thumb_image_id, s.name, s.hero_images FROM items i JOIN sources s ON s.id = i.source_id WHERE i.id = ?")
+    .get(itemId) as { id: string; url: string; image_candidates: string; source_id: string; thumb_image_id: number | null; name: string; hero_images: number } | undefined;
   if (!item) return null;
+  if (item.thumb_image_id) return item.thumb_image_id; // deja procesat
   const candidates = (JSON.parse(item.image_candidates) as ImageCandidate[]).filter((c) => !knownDefault(item.source_id, c.url));
   const ranked = await rankCandidates(candidates, item.url, 400);
   const heroAllowed = config.images.sourceImages === "hero" || item.hero_images === 1;
@@ -99,7 +98,7 @@ export async function makeSourceThumb(itemId: string): Promise<number | null> {
     } catch {
       continue;
     }
-    if (isDefaultImage(item.source_id, processed.ahash, c.url)) {
+    if (isDefaultImage(item.source_id, itemId, processed.ahash, c.url)) {
       // Retragem retroactiv poza implicită de la articolele anterioare ale sursei.
       d.prepare(
         "UPDATE items SET thumb_image_id = NULL WHERE thumb_image_id IN (SELECT id FROM images WHERE source_id = ? AND (ahash = ? OR original_url = ?))"

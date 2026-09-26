@@ -62,7 +62,7 @@ export const config = {
     dailyBudgetUsd: num("LLM_DAILY_BUDGET_USD", 3),
     maxArticlesPerDay: num("LLM_MAX_ARTICLES_PER_DAY", 150),
     maxBriefsPerDay: num("LLM_MAX_BRIEFS_PER_DAY", 300),
-    timeoutMs: num("LLM_TIMEOUT_SEC", 300) * 1000,
+    timeoutMs: num("LLM_TIMEOUT_SEC", 180) * 1000,
     /** Mod JSON: „json_object” (DeepSeek), „json_schema” (Ollama/llama.cpp/Scaleway) sau „off”. */
     jsonMode: str("LLM_JSON_MODE", "json_object") as "json_object" | "json_schema" | "off",
     concurrency: num("LLM_CONCURRENCY", 2),
