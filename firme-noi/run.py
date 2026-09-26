@@ -262,7 +262,37 @@ def cmd_verify(args, cfg, db):
     print(f"\nRezumat: {confirmate}/{len(cuis)} în ANAF; {cu_tel} cu telefon la ANAF.")
 
 
+def print_year_summary(an: int, db) -> None:
+    """Statistici pentru înregistrările noi dintr-un an (folosite la export pe ani)."""
+    rows = db.query(inregistrata_dupa=f"{an}-01-01", inregistrata_inainte=f"{an}-12-31")
+    tipuri = Counter(tip_entitate(c) for c in rows)
+    firme = [c for c in rows if este_firma_noua_activa(c)]
+    cu_tel = [c for c in firme if c.telefon and not c.telefon_suspect]
+    date = sorted(c.data_inregistrare for c in rows if c.data_inregistrare)
+    print(f"Înregistrări noi {an}")
+    print("=" * 40)
+    print(f"  Total înregistrări:              {len(rows)}")
+    if date:
+        print(f"  Interval:                        {date[0]} – {date[-1]}")
+    print(f"  Firme noi active:                {len(firme)}")
+    pct = round(100 * len(cu_tel) / len(firme)) if firme else 0
+    print(f"  Firme noi active cu telefon:     {len(cu_tel)} ({pct}%)")
+    print("\n  Pe tip de entitate:")
+    for name, n in tipuri.most_common():
+        print(f"    {name}: {n}")
+    print("\n  Firme noi active pe județe (top 15):")
+    for name, n in Counter(c.judet for c in firme if c.judet).most_common(15):
+        print(f"    {name}: {n}")
+    print("\n  Firme noi active pe domenii CAEN:")
+    for (lit, nume), n in Counter((c.caen_sectiune, c.caen_sectiune_nume)
+                                  for c in firme if c.caen_sectiune).most_common():
+        print(f"    {lit} — {nume}: {n}")
+
+
 def cmd_stats(args, cfg, db):
+    if getattr(args, "an", None):
+        print_year_summary(args.an, db)
+        return
     s = db.stats()
     print("Statistici bază de date")
     print("=" * 40)
@@ -401,6 +431,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_verify)
 
     sp = sub.add_parser("stats", help="statistici detaliate")
+    sp.add_argument("--an", type=int, help="doar înregistrările noi din acest an")
     sp.set_defaults(func=cmd_stats)
 
     sp = sub.add_parser("filter", help="filtrează și afișează firme")

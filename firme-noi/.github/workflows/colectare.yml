@@ -116,38 +116,29 @@ jobs:
       - name: Statistici
         run: python run.py stats
 
-      - name: Export Excel + CSV
-        run: |
-          mkdir -p out
-          # Firme noi active (fără sedii secundare, PFA, profesii liberale, radiate)
-          python run.py export --format xlsx --doar-firme --dupa "$DUPA" --out "out/Firme-noi-$AN.xlsx"
-          python run.py export --format xlsx --doar-firme --dupa "$DUPA" --with-phone --fara-suspecte \
-            --out "out/Firme-noi-$AN-cu-telefon.xlsx"
-          # Toate înregistrările (inclusiv sedii secundare, PFA), cu coloana „tip_entitate"
-          python run.py export --dupa "$DUPA" --out "out/Toate-inregistrarile-$AN.csv"
-          python run.py stats > out/STATISTICI.txt
+      - name: Stare scanare
+        id: stare
+        run: echo "status=$(cat data/scan_status.txt 2>/dev/null || echo complete)" >> "$GITHUB_OUTPUT"
+
+      # Exportul și publicarea se fac doar când scanarea e completă; tranșele
+      # intermediare doar colectează și pornesc tranșa următoare.
+      - name: Export pe ani
+        if: steps.stare.outputs.status != 'partial'
+        run: bash scripts/export_ani.sh
 
       - name: Rezultate (artifact)
+        if: steps.stare.outputs.status != 'partial'
         uses: actions/upload-artifact@v4
         with:
-          name: firme-noi-${{ env.AN }}
+          name: firme-noi-${{ github.run_id }}
           path: out/
           retention-days: 30
 
-      - name: Rezultate (branch privat „rezultate")
+      - name: Rezultate (branch-uri private „rezultate" / „rezultate-AN")
+        if: steps.stare.outputs.status != 'partial'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          d="$(mktemp -d)"
-          cp "out/Firme-noi-$AN.xlsx" "out/Firme-noi-$AN-cu-telefon.xlsx" out/STATISTICI.txt "$d/"
-          gzip -c "out/Toate-inregistrarile-$AN.csv" > "$d/Toate-inregistrarile-$AN.csv.gz"
-          cd "$d"
-          git init -q -b rezultate
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -qm "Rezultate $(date -u +%F) – rulare ${GITHUB_RUN_ID}"
-          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" rezultate
+        run: bash scripts/publica_rezultate.sh
 
       - name: Continuă automat (dacă scanarea nu s-a terminat)
         env:

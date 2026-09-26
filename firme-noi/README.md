@@ -48,8 +48,10 @@ cerere); rulările următoare interoghează doar firmele nou apărute.
 1. Creează un repository **privat** (ex. `firme-noi`) și copiază în el conținutul
    acestui folder (`firme-noi/` devine rădăcina repository-ului).
 2. În tab-ul **Actions** pornește „Colectare firme noi" (*Run workflow*).
-3. Excel-ul apare în branch-ul **`rezultate`** al repository-ului (ultima rulare)
-   și în secțiunea **Artifacts** a rulării. De atunci rulează singur în fiecare
+3. Excel-urile apar pe ani: anul curent în branch-ul **`rezultate`**, anii
+   încheiați în **`rezultate-2025`**, **`rezultate-2024`** etc., plus în secțiunea
+   **Artifacts** a rulării. Pentru ani anteriori, pornește workflow-ul cu data de
+   început dorită (ex. `2024-01-01`); scanarea continuă de unde a rămas. De atunci rulează singur în fiecare
    dimineață; o rulare suplimentară pornește și la modificarea fișierului
    `rulare.txt`. Workflow-ul refuză să ruleze într-un repository public, ca
    datele de contact să nu devină publice.
