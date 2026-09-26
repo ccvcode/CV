@@ -202,8 +202,8 @@ același telefon (ex. „OASIS CONFORT S.R.L." 55623502 = punct de lucru al firm
 54213946). În ianuarie–martie 2026 au fost ~30.000 de astfel de înregistrări;
 ele nu sunt numărate ca firme noi.
 
-Firme noi active (cu număr J): **2024: 69.681 · 2025: 88.380 · 2026 (până la 25
-sept): 54.939**. Fișierele principale (`Firme-noi-AN*.xlsx`) conțin doar
+Firme noi active (cu număr J): **2020: 47.465 · 2021: 63.666 · 2022: 75.079 ·
+2023: 68.007 · 2024: 69.681 · 2025: 88.380 · 2026 (până la 25 sept): 54.939**. Fișierele principale (`Firme-noi-AN*.xlsx`) conțin doar
 firmele noi active; `Toate-inregistrarile-AN.csv.gz` le conține pe toate.
 
 ## Verificarea telefoanelor
@@ -222,8 +222,10 @@ firmele noi active; `Toate-inregistrarile-AN.csv.gz` le conține pe toate.
 
 Coloana **„Calitate telefon"**: OK · Străin · Comun · Suspect. Fișierul
 `*-cu-telefon.xlsx` conține doar OK și Străin (`--with-phone --fara-suspecte
---fara-comune`). Firme noi active cu telefon propriu valid: 2024: 46.671 (67%)
-· 2025: 59.138 (67%) · 2026: 36.335 (66%).
+--fara-comune`). Firme noi active cu telefon propriu valid: 2020: 13.434 (28%) ·
+2021: 16.596 (26%) · 2022: 19.547 (26%) · 2023: 42.092 (62%) · 2024: 44.778 (64%) ·
+2025: 57.154 (65%) · 2026: 35.226 (64%). ANAF are telefonul mult mai rar pentru
+firmele înființate înainte de decembrie 2022.
 
 ## Filtre disponibile (comenzile `filter` și `export`)
 

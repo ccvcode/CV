@@ -13,22 +13,30 @@ Proprietar: utilizator român, prospectare comercială. Comunicarea e în român
 
 ## Stare (26 septembrie 2026)
 
+Colectare completă 2020 – 25.09.2026: **1.356.255 înregistrări ANAF** în bază.
+
 | An | Înregistrări ANAF | Firme noi active | Cu telefon propriu verificat |
 |---|---|---|---|
-| 2024 | 173.219 | 69.681 | 46.671 (67%) |
-| 2025 | 211.750 | 88.380 | 59.138 (67%) |
-| 2026 (până la 25 sept) | 243.152 | 54.939 | 36.335 (66%) |
+| 2020 | 144.205 | 47.465 | 13.434 (28%) |
+| 2021 | 190.983 | 63.666 | 16.596 (26%) |
+| 2022 | 197.248 | 75.079 | 19.547 (26%) |
+| 2023 | 195.698 | 68.007 | 42.092 (62%) |
+| 2024 | 173.219 | 69.681 | 44.778 (64%) |
+| 2025 | 211.750 | 88.380 | 57.154 (65%) |
+| 2026 (până la 25 sept) | 243.152 | 54.939 | 35.226 (64%) |
 
-- 2020–2023: colectarea a fost pornită pe GitHub Actions pe 26.09.2026
-  (`dupa=2020-01-01`, tranșe de 4.000 de loturi). Când se termină, rezultatele
-  sunt în branch-urile `rezultate-2020` … `rezultate-2023`.
+- ANAF are telefon la ~35–40% din înregistrările din ian. 2020 – nov. 2022 și la
+  ~70% începând cu dec. 2022 (salt brusc, deci o schimbare la sursă, nu o
+  eroare de colectare).
 - Rezultatele pe ani sunt în repository-ul **privat** `ccvcode/web-development`,
-  branch-urile `rezultate` (anul curent), `rezultate-2025`, `rezultate-2024`
-  (…): `Firme-noi-AN.xlsx`, `Firme-noi-AN-cu-telefon.xlsx`,
+  branch-urile `rezultate` (anul curent) și `rezultate-2020` … `rezultate-2025`:
+  `Firme-noi-AN.xlsx`, `Firme-noi-AN-cu-telefon.xlsx`,
   `Toate-inregistrarile-AN.csv.gz`, `STATISTICI.txt`.
 - Codul: `ccvcode/web-development` (branch `main`, proiectul e la rădăcină) și
   `ccvcode/CV` (branch `claude/automat-colectare-companii-ji60wt`, folderul
   `firme-noi/`). Cele două copii sunt identice.
+- Numărul de telefoane „comune" depinde de câți ani sunt în bază: cu mai mulți
+  ani, mai multe numere de contabili ajung la pragul de 3 firme.
 
 ## Rulare locală (fără GitHub)
 
