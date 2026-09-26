@@ -47,7 +47,8 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
 
   const a = s.article;
   const cat = CATEGORY_MAP[s.card.category];
-  const hero = s.card.hero && s.card.hero.kind !== "card" ? s.card.hero : undefined;
+  // Fiecare articol are imagine: poza aleasă automat sau, în lipsa ei, coperta generată.
+  const hero = s.card.hero;
   const firstReport = [...s.sources].sort((x, y) => x.published - y.published)[0];
   const outlets = [...new Set(s.sources.map((x) => x.name))];
   const updated = a && a.updated - a.published > 5 * 60_000 ? a.updated : undefined;

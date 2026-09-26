@@ -12,7 +12,7 @@ import { processImage, saveImageRow } from "./store";
  *   1. poza unei publicații-sursă — doar dacă este permis (MEDIAN_SOURCE_IMAGES=hero sau sursa are acord);
  *   2. imaginea oficială din Wikidata a entității principale (persoană, instituție, loc);
  *   3. căutare Wikimedia Commons după entități;
- *   4. Unsplash / Pexels după interogarea generată de AI (dacă există chei);
+ *   4. Commons, apoi Unsplash / Pexels (dacă există chei) după interogarea generată de AI;
  *   5. copertă tipografică generată (nu eșuează niciodată).
  * Fiecare imagine are credit și licență, afișate sub poză.
  */
@@ -91,10 +91,12 @@ export async function chooseHero(storyId: string): Promise<number | null> {
     if (id) return setHero(storyId, id);
   }
 
-  // 4. Fotografii de stoc după interogarea generată de AI.
-  // Știrile scurte nu consumă din cota Unsplash/Pexels (limitată pe oră).
-  const query = article?.kind === "full" ? article.image_query : "";
+  // 4. Fotografii de ilustrare după interogarea generată de AI (Commons, apoi Unsplash / Pexels).
+  // Se ajunge aici doar când sursele nu au o poză utilizabilă, deci cota de stoc nu se consumă des.
+  const query = article?.image_query?.trim() ?? "";
   if (query) {
+    const c = await tryOpen("commons", () => commonsSearch(query, 5));
+    if (c) return setHero(storyId, c);
     const u = await tryOpen("unsplash", () => unsplashSearch(query));
     if (u) return setHero(storyId, u);
     const p = await tryOpen("pexels", () => pexelsSearch(query));
