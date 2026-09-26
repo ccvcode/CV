@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { CATEGORIES } from "@/lib/core/categories";
 
-export function Footer({ outlets }: { outlets: string[] }) {
+export function Footer({ outlets, ai = true }: { outlets: string[]; ai?: boolean }) {
   return (
     <footer className="mt-24 overflow-hidden bg-ink text-on-ink">
       <div className="mx-auto max-w-[1320px] px-4 pt-14 sm:px-8">
@@ -55,8 +55,9 @@ export function Footer({ outlets }: { outlets: string[] }) {
           </div>
         </div>
         <p className="ui mt-12 max-w-3xl text-[12px] leading-relaxed opacity-60">
-          Median sintetizează automat, cu ajutorul inteligenței artificiale, știri publicate de alte redacții. Faptele aparțin surselor citate,
-          care sunt indicate la fiecare articol; formularea este a Median. Semnalează o eroare la pagina Corecturi.
+          {ai
+            ? "Median sintetizează automat, cu ajutorul inteligenței artificiale, știri publicate de alte redacții. Faptele aparțin surselor citate, care sunt indicate la fiecare articol; formularea este a Median. Semnalează o eroare la pagina Corecturi."
+            : "Median grupează automat știrile publicate de alte redacții: titlul, un extras scurt și legătura către fiecare sursă. Textul complet aparține publicațiilor citate. Semnalează o eroare la pagina Corecturi."}
         </p>
       </div>
       <div aria-hidden className="masthead -mb-[3.2vw] mt-10 select-none whitespace-nowrap text-center text-[21vw] leading-[0.8] opacity-95">

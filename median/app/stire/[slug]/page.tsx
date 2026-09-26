@@ -50,6 +50,9 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
   // Fiecare articol are imagine: poza aleasă automat sau, în lipsa ei, coperta generată.
   const hero = s.card.hero;
   const firstReport = [...s.sources].sort((x, y) => x.published - y.published)[0];
+  // „Știrea completă” trimite la articolul din care vin titlul și extrasul afișate.
+  const mainSource = s.sources.find((x) => x.lead) ?? firstReport;
+  const outletCount = new Set(s.sources.map((x) => x.name)).size;
   const outlets = [...new Set(s.sources.map((x) => x.name))];
   const updated = a && a.updated - a.published > 5 * 60_000 ? a.updated : undefined;
   const pull: ArticleQuote | undefined = a?.quotes.find((q) => q.text.length > 40 && q.text.length < 260);
@@ -101,7 +104,7 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
             )}
 
             <div className="meta mt-5 flex flex-wrap items-center gap-x-3 gap-y-1 border-y border-rule py-3">
-              <span className="font-semibold text-ink">Redacția Median</span>
+              <span className="font-semibold text-ink">{a ? "Redacția Median" : outletCount === 1 ? "Agregat dintr-o sursă" : `Agregat din ${outletCount} publicații`}</span>
               <span aria-hidden>·</span>
               <span suppressHydrationWarning>
                 {formatLongDate(a?.published ?? s.card.published)}, {formatTime(a?.published ?? s.card.published)}
@@ -175,11 +178,11 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
                 <>
                   {a?.kind === "brief" && <p className="dropcap">{a.dek}</p>}
                   {!a && s.card.dek && <p>{s.card.dek}</p>}
-                  {firstReport && (
+                  {mainSource && (
                     <p className="ui text-[16px]">
                       Știrea completă:{" "}
-                      <a href={firstReport.url} target="_blank" rel="noopener" className="font-semibold">
-                        {firstReport.name} — {firstReport.title} ↗
+                      <a href={mainSource.url} target="_blank" rel="noopener" className="font-semibold">
+                        {mainSource.name} — {mainSource.title} ↗
                       </a>
                     </p>
                   )}

@@ -1,4 +1,5 @@
 import { config } from "../../core/config";
+import { HttpError, httpGet } from "../http";
 
 /*
  * Imagini cu licență liberă pentru poza principală a articolelor:
@@ -26,20 +27,37 @@ export interface OpenImage {
 
 const ALLOWED_LICENSE = /^(cc0|cc[- ]?zero|public domain|pd|cc[- ]by(-sa)?[- ]?\d(\.\d)?|cc[- ]by(-sa)?)/i;
 
+/** Cererile către API-uri trec prin același client HTTP ca restul (protecție SSRF, proxy, limită de mărime). */
 async function getJson<T>(url: string, headers: Record<string, string> = {}): Promise<T> {
-  const { fetch: f } = await import("undici");
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 10_000);
-  try {
-    const res = await f(url, { signal: ctrl.signal, headers: { "user-agent": config.userAgent, accept: "application/json", ...headers } });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(t);
-  }
+  const wikimedia = /(^|\.)(wikidata|wikimedia)\.org$/.test(new URL(url).hostname);
+  // Politica Wikimedia pentru roboți: User-Agent cu nume, site și adresă de contact.
+  if (wikimedia) headers = { "user-agent": `MedianBot/2.0 (${config.siteUrl}; ${config.contactEmail})`, ...headers };
+  const get = () => httpGet(url, { timeoutMs: 12_000, maxBytes: 4_000_000, accept: "application/json", headers });
+  if (!wikimedia) return JSON.parse((await get()).text) as T;
+  // Wikimedia cere cereri secvențiale de la roboți: le trimitem pe rând, cu o pauză scurtă între ele,
+  // și reîncercăm de cel mult două ori după o limitare (HTTP 429), cât cere antetul Retry-After.
+  const run = wikimediaQueue.then(async () => {
+    for (let attempt = 0; ; attempt++) {
+      const wait = lastWikimedia + 250 - Date.now();
+      if (wait > 0) await sleep(wait);
+      lastWikimedia = Date.now();
+      try {
+        return JSON.parse((await get()).text) as T;
+      } catch (e) {
+        if (attempt >= 2 || !(e instanceof HttpError) || e.status !== 429) throw e;
+        await sleep(Math.min(60, e.retryAfterSec ?? 5) * 1000);
+      }
+    }
+  });
+  wikimediaQueue = run.catch(() => undefined);
+  return run;
 }
 
-const foldName = (s: string) =>
+let wikimediaQueue: Promise<unknown> = Promise.resolve();
+let lastWikimedia = 0;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export const foldName = (s: string) =>
   s
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -106,6 +124,19 @@ async function commonsFiles(titles: string[]): Promise<OpenImage[]> {
 /** Imaginea oficială (P18) a unei entități din Wikidata, căutată după nume în română. */
 export async function wikidataImage(name: string): Promise<OpenImage | undefined> {
   if (!config.images.commons) return undefined;
+  // Aceeași persoană apare în multe subiecte: ținem minte rezultatul câteva ore.
+  const key = foldName(name);
+  const hit = wikidataCache.get(key);
+  if (hit && Date.now() - hit.at < 6 * 3600_000) return hit.img;
+  const img = await wikidataLookup(name);
+  wikidataCache.set(key, { img, at: Date.now() });
+  if (wikidataCache.size > 2000) wikidataCache.delete(wikidataCache.keys().next().value!);
+  return img;
+}
+
+const wikidataCache = new Map<string, { img: OpenImage | undefined; at: number }>();
+
+async function wikidataLookup(name: string): Promise<OpenImage | undefined> {
   const s = new URLSearchParams({ action: "wbsearchentities", format: "json", language: "ro", uselang: "ro", type: "item", limit: "3", search: name });
   const found = await getJson<{ search?: { id: string; label?: string; description?: string; match?: { text?: string } }[] }>(`https://www.wikidata.org/w/api.php?${s}`);
   // Doar entitățile al căror nume corespunde exact (altfel riscăm poza altei persoane cu nume asemănător).

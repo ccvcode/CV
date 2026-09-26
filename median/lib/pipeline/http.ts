@@ -3,7 +3,7 @@ import dnsCb from "dns";
 import dnsP from "dns/promises";
 import ipaddr from "ipaddr.js";
 import net from "net";
-import { Agent, fetch as undiciFetch } from "undici";
+import { Agent, EnvHttpProxyAgent, fetch as undiciFetch } from "undici";
 import { config } from "../core/config";
 
 /* ------------------------------------------------------------------ protecție SSRF */
@@ -34,9 +34,13 @@ function safeLookup(hostname: string, options: dns.LookupOptions, callback: (err
   });
 }
 
-let dispatcher: Agent | undefined;
-function publicDispatcher(): Agent | undefined {
+let dispatcher: Agent | EnvHttpProxyAgent | undefined;
+function publicDispatcher(): Agent | EnvHttpProxyAgent | undefined {
   if (config.demo || process.env.MEDIAN_ALLOW_PRIVATE === "1") return undefined;
+  // Dacă serverul iese pe internet printr-un proxy (HTTPS_PROXY/HTTP_PROXY, cu NO_PROXY respectat),
+  // conexiunea o deschide proxy-ul; adresa destinației e verificată oricum de assertPublicUrl.
+  if (process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy)
+    return (dispatcher ??= new EnvHttpProxyAgent({ connect: { lookup: safeLookup as never } }));
   return (dispatcher ??= new Agent({ connect: { lookup: safeLookup as never } }));
 }
 
@@ -72,6 +76,8 @@ export interface FetchOptions {
   accept?: string;
   /** Oprește citirea după </head> (pentru metadate og:image). */
   stopAtHead?: boolean;
+  /** Antete suplimentare (ex. autorizare pentru API-uri). */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -92,6 +98,7 @@ export async function httpGet(url: string, opts: FetchOptions = {}): Promise<Fet
     if (opts.etag) headers["if-none-match"] = opts.etag;
     if (opts.lastModified) headers["if-modified-since"] = opts.lastModified;
     if (opts.referer) headers.referer = opts.referer;
+    Object.assign(headers, opts.headers);
     const res = await safeFetch(url, { signal: ctrl.signal, headers });
     const h = res.headers as unknown as Headers;
     if (res.status === 304) {
@@ -100,7 +107,7 @@ export async function httpGet(url: string, opts: FetchOptions = {}): Promise<Fet
     }
     if (!res.ok || !res.body) {
       ctrl.abort();
-      throw new HttpError(res.status, `HTTP ${res.status}`);
+      throw new HttpError(res.status, `HTTP ${res.status}`, Number(res.headers.get("retry-after")) || undefined);
     }
     const bytes = await readLimited(res.body as unknown as ReadableStream<Uint8Array>, opts.maxBytes ?? 3_000_000, opts.stopAtHead);
     ctrl.abort();
@@ -113,7 +120,7 @@ export async function httpGet(url: string, opts: FetchOptions = {}): Promise<Fet
 /** Descarcă un fișier binar (imagini), cu limită de mărime. */
 export async function httpGetBuffer(url: string, opts: FetchOptions = {}): Promise<{ buffer: Buffer; contentType: string }> {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 15_000);
+  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 40_000);
   try {
     await assertPublicUrl(url);
     const headers: Record<string, string> = { "user-agent": config.userAgent, accept: opts.accept ?? "image/avif,image/webp,image/*;q=0.9,*/*;q=0.5" };
@@ -146,7 +153,7 @@ async function safeFetch(url: string, init: { signal: AbortSignal; headers: Reco
 }
 
 export class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public retryAfterSec?: number) {
     super(message);
   }
 }

@@ -219,6 +219,12 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (source_id, hash, item_id)
   );
   `,
+  // 4 — articolul „central” al subiectului (titlul și poza de lucru) și citirea o singură dată a
+  //     metadatelor paginii (og:image) pentru articolele fără poză în RSS
+  `
+  ALTER TABLE stories ADD COLUMN lead_item_id TEXT;
+  ALTER TABLE items ADD COLUMN page_meta INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 type DB = Database.Database;

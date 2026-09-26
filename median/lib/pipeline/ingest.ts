@@ -6,7 +6,7 @@ import { hashId, slugify } from "../core/utils";
 import { httpGet } from "./http";
 import { enqueue } from "./jobs";
 import { parseFeed } from "./rss";
-import { classifyCategory, detectRegion, detectSensitive, docVector, fingerprint, fingerprintSimilarity, keywords, sameStory, type DocVector } from "./text";
+import { byCentrality, classifyCategory, detectRegion, detectSensitive, docVector, fingerprint, fingerprintSimilarity, keywords, sameStory, type DocVector } from "./text";
 
 const WINDOW_MS = 36 * 3600_000;
 
@@ -253,17 +253,18 @@ export function refreshStory(storyId: string, now = Date.now()) {
   const ageH = Math.max(0, (now - last) / 3600_000);
   const score = storyScore(sourceCount, tier1, recentHour, ageH);
 
-  // Titlul de lucru: al publicației cu cel mai înalt nivel, cea mai veche (până la articolul AI).
-  const lead = [...items].sort((a, b) => a.tier - b.tier || a.published_at - b.published_at)[0];
+  // Titlul de lucru (până la articolul AI): articolul cel mai reprezentativ pentru subiect.
+  const lead = byCentrality(items.filter((i) => !i.duplicate_of).length ? items.filter((i) => !i.duplicate_of) : items)[0];
   const kw = [...new Set(items.flatMap((i) => keywords(i.title)))].slice(0, 40).join(" ");
 
   d.prepare(
     `UPDATE stories SET category = ?, region = ?, sensitive = ?, source_count = ?, item_count = ?, score = ?,
        first_published_at = ?, last_published_at = ?, updated_at = ?, keywords = ?,
        title = CASE WHEN article_id IS NULL THEN ? ELSE title END,
-       slug = CASE WHEN article_id IS NULL THEN ? ELSE slug END
+       slug = CASE WHEN article_id IS NULL THEN ? ELSE slug END,
+       lead_item_id = ?
      WHERE id = ?`
-  ).run(category, region, sensitive, sourceCount, items.length, score, first, last, now, kw, lead.title, slugify(lead.title, 80), storyId);
+  ).run(category, region, sensitive, sourceCount, items.length, score, first, last, now, kw, lead.title, slugify(lead.title, 80), lead.id, storyId);
 
   d.prepare("DELETE FROM search WHERE story_id = ?").run(storyId);
   d.prepare("INSERT INTO search(story_id, title, body) VALUES (?, ?, ?)").run(storyId, items.map((i) => i.title).join(" · "), items.map((i) => i.summary.slice(0, 500)).join(" "));
@@ -284,6 +285,12 @@ export function refreshStory(storyId: string, now = Date.now()) {
     enqueue("write", `write:${storyId}`, { storyId }, { priority: Math.round(score * 10), delayMs: 60_000, requeue: true });
   } else if (sourceCount === 1 && !existing) {
     enqueue("brief", `brief:${storyId}`, { storyId }, { priority: Math.round(score * 10), delayMs: 30_000 });
+  }
+  // Fără redactor AI, subiectele apar ca agregare: poza principală se alege direct (cu AI, după redactare).
+  if (!llmEnabled()) {
+    const hero = d.prepare("SELECT i.kind FROM stories s JOIN images i ON i.id = s.hero_image_id WHERE s.id = ?").get(storyId) as { kind: string } | undefined;
+    if (!hero || hero.kind === "card")
+      enqueue("image", `image:${storyId}:raw`, { storyId }, { priority: Math.round(score * 10), delayMs: 15_000, requeue: true });
   }
 }
 

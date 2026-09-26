@@ -46,6 +46,14 @@ export async function processImage(buffer: Buffer, widths: number[], opts: { min
     }
     made.push(w);
   }
+  // O poză între două trepte (ex. 640px, când următoarea e 800) primește și o variantă la mărimea
+  // ei reală, ca să nu fie afișată mărită de la 400px.
+  const nativeW = Math.min(meta.width, Math.max(...widths));
+  if (widths.length > 1 && nativeW >= 560 && nativeW > made[made.length - 1] * 1.25) {
+    const out = path.join(paths.media, `${rel}-${nativeW}.webp`);
+    if (!fs.existsSync(out)) await sharp(buffer).rotate().resize({ width: nativeW }).webp({ quality: 78, effort: 4 }).toFile(out);
+    made.push(nativeW);
+  }
 
   // Placeholder (thumbhash), culoare dominantă, amprentă perceptuală (aHash 8x8) și entropie.
   const small = await sharp(buffer).rotate().resize(64, 64, { fit: "inside" }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });

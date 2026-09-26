@@ -16,6 +16,8 @@ export interface SourceChip {
   title: string;
   published: number;
   thumb?: Img;
+  /** Articolul reprezentativ al subiectului (dă titlul de lucru și extrasul). */
+  lead?: boolean;
 }
 
 export interface StoryCard {
@@ -78,6 +80,7 @@ interface StoryRow {
   breaking: number;
   pinned: number;
   hero_image_id: number | null;
+  lead_item_id: string | null;
   article_id: number | null;
   a_kind: string | null;
   a_dek: string | null;
@@ -88,7 +91,7 @@ interface StoryRow {
 
 const STORY_SELECT = `
   SELECT s.id, s.slug, s.category, s.region, s.title, s.first_published_at, s.last_published_at, s.source_count, s.score, s.breaking, s.pinned,
-         s.hero_image_id, s.article_id, a.kind AS a_kind, a.dek AS a_dek, a.word_count AS a_words, a.published_at AS a_published, a.updated_at AS a_updated
+         s.hero_image_id, s.lead_item_id, s.article_id, a.kind AS a_kind, a.dek AS a_dek, a.word_count AS a_words, a.published_at AS a_published, a.updated_at AS a_updated
   FROM stories s LEFT JOIN articles a ON a.id = s.article_id AND a.status = 'published'`;
 
 /** Cu AI activ afișăm doar subiectele cu articol publicat; fără AI, afișăm agregarea brută. */
@@ -114,10 +117,10 @@ function cards(rows: StoryRow[]): StoryCard[] {
   const ph = ids.map(() => "?").join(",");
   const items = d
     .prepare(
-      `SELECT i.story_id, i.title, i.summary, i.thumb_image_id, i.published_at, s.name, s.site, s.tier
+      `SELECT i.id, i.story_id, i.title, i.summary, i.thumb_image_id, i.published_at, s.name, s.site, s.tier
        FROM items i JOIN sources s ON s.id = i.source_id WHERE i.story_id IN (${ph}) AND i.duplicate_of IS NULL ORDER BY s.tier, i.published_at`
     )
-    .all(...ids) as { story_id: string; title: string; summary: string; thumb_image_id: number | null; published_at: number; name: string; site: string }[];
+    .all(...ids) as { id: string; story_id: string; title: string; summary: string; thumb_image_id: number | null; published_at: number; name: string; site: string }[];
   const byStory = new Map<string, typeof items>();
   for (const it of items) {
     let l = byStory.get(it.story_id);
@@ -127,9 +130,10 @@ function cards(rows: StoryRow[]): StoryCard[] {
   return rows.map((r) => {
     const its = byStory.get(r.id) ?? [];
     const outlets = [...new Map(its.map((i) => [i.name, { name: i.name, site: i.site }])).values()];
-    const thumbItem = its.find((i) => i.thumb_image_id);
+    // Miniatura: întâi a articolului reprezentativ (cel care dă și titlul de lucru).
+    const thumbItem = its.find((i) => i.id === r.lead_item_id && i.thumb_image_id) ?? its.find((i) => i.thumb_image_id);
     const kind = (r.a_kind as "full" | "brief" | null) ?? "raw";
-    const dek = r.a_dek ?? snippet(its[0]?.summary ?? "");
+    const dek = r.a_dek ?? snippet((its.find((i) => i.id === r.lead_item_id) ?? its[0])?.summary ?? "");
     return {
       id: r.id,
       href: storyHref(r),
@@ -290,11 +294,20 @@ export function getStory(id: string, opts: { preview?: boolean } = {}): StoryDet
 
   const items = d
     .prepare(
-      `SELECT i.url, i.title, i.published_at, i.thumb_image_id, s.name, s.site FROM items i JOIN sources s ON s.id = i.source_id
+      `SELECT i.id, i.url, i.title, i.published_at, i.thumb_image_id, s.name, s.site FROM items i JOIN sources s ON s.id = i.source_id
        WHERE i.story_id = ? ORDER BY i.published_at`
     )
-    .all(id) as { url: string; title: string; published_at: number; thumb_image_id: number | null; name: string; site: string }[];
-  const sources: SourceChip[] = items.map((i) => ({ name: i.name, site: i.site, url: i.url, title: i.title, published: i.published_at, thumb: imageById(i.thumb_image_id) }));
+    .all(id) as { id: string; url: string; title: string; published_at: number; thumb_image_id: number | null; name: string; site: string }[];
+  const leadId = (d.prepare("SELECT lead_item_id FROM stories WHERE id = ?").get(id) as { lead_item_id: string | null } | undefined)?.lead_item_id;
+  const sources: SourceChip[] = items.map((i) => ({
+    name: i.name,
+    site: i.site,
+    url: i.url,
+    title: i.title,
+    published: i.published_at,
+    thumb: imageById(i.thumb_image_id),
+    lead: i.id === leadId,
+  }));
   const corrections = d.prepare("SELECT text, created_at FROM corrections WHERE story_id = ? ORDER BY created_at").all(id) as { text: string; created_at: number }[];
 
   // Subiecte legate: aceeași categorie, cuvinte-cheie comune.

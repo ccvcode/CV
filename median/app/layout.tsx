@@ -4,7 +4,7 @@ import "./globals.css";
 import { Footer } from "@/components/footer";
 import { Masthead, themeScript } from "@/components/masthead";
 import { config } from "@/lib/core/config";
-import { outletsList, siteStatus } from "@/lib/data/queries";
+import { aiMode, outletsList, siteStatus } from "@/lib/data/queries";
 import { getRates, getWeather } from "@/lib/data/widgets";
 
 export const metadata: Metadata = {
@@ -91,7 +91,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           </div>
         )}
         <div id="continut">{children}</div>
-        <Footer outlets={outlets} />
+        <Footer outlets={outlets} ai={aiMode()} />
       </body>
     </html>
   );

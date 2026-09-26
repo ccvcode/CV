@@ -96,14 +96,93 @@ export function docVector(title: string, lead: string): DocVector {
  * Decizia „același subiect”: similaritate mare, sau similaritate moderată confirmată de cel puțin
  * un nume propriu sau o cifră comună (evită grupările pe cuvinte generice precum „au crescut”).
  */
+/*
+ * Nume proprii care apar în știri fără legătură între ele: țări și blocuri mari, agenții de presă,
+ * publicații, rețele sociale. Nu confirmă că două articole descriu același eveniment
+ * (ex. „o insectă din SUA, citată de AFP” ≠ „Iranul trimite SUA o propunere, relatează AFP”).
+ * Forma e cea din `entities()`: fiecare cuvânt fără diacritice, tăiat la 6 litere.
+ */
+const GENERIC_ENTITIES = new Set(
+  (
+    "sua|statel unite|americ|romani|europa|europe|uniune europe|ue|nato|onu|rusia|rusiei|rusa|federa rusa|ucrain|china|chinei|" +
+    "german|franta|frante|italia|italie|spania|spanie|marea britan|regatu unit|ungari|bulgar|poloni|turcia|turcie|israel|" +
+    "iran|iranul|moldov|republ moldov|" +
+    "bucure|washin|moscov|kiev|beijin|bruxel|londra|paris|berlin|" +
+    "afp|reuter|ap|associ press|agerpr|mediaf|news ro|efe|dpa|ansa|tass|ria novost|cnn|bbc|wsj|wall street journa|" +
+    "new york times|bloomb|politi|guardi|financ times|digi24|hotnew|g4medi|antena|protv|" +
+    "facebo|instag|tiktok|youtub|truth social|x|twitte"
+  ).split("|")
+);
+
 export function sameStory(a: DocVector, b: DocVector, idf: (t: string) => number): { same: boolean; score: number } {
   const score = similarity(a, b, idf);
   if (score >= 0.36) return { same: true, score };
   if (score < 0.2) return { same: false, score };
-  // Numele proprii foarte frecvente („România”, „Guvernul”) nu confirmă nimic.
-  for (const e of a.entities) if (b.entities.has(e) && idf(e) >= 2.2) return { same: true, score };
+  // Numele proprii foarte frecvente („România”, „Guvernul”) sau generice (țări, agenții) nu confirmă nimic.
+  for (const e of a.entities) if (b.entities.has(e) && idf(e) >= 2.2 && !GENERIC_ENTITIES.has(e)) return { same: true, score };
   for (const n of a.numbers) if (b.numbers.has(n)) return { same: true, score };
   return { same: false, score };
+}
+
+/**
+ * Ordonează articolele unui subiect după cât de „centrale” sunt: media similarității cu celelalte.
+ * Primul este cel mai reprezentativ pentru subiect (titlul și poza de lucru vin de la el), astfel
+ * încât un articol prins la marginea grupului să nu dea titlul sau poza întregului subiect.
+ * La egalitate: publicațiile de nivel 1, apoi cel mai vechi.
+ */
+export function byCentrality<T extends { title: string; summary: string; tier: number; published_at: number }>(items: T[]): T[] {
+  if (items.length < 3) return [...items].sort((a, b) => a.tier - b.tier || a.published_at - b.published_at);
+  const vecs = items.map((i) => docVector(i.title, i.summary));
+  const one = () => 1;
+  const score = items.map((_, i) => {
+    let sum = 0;
+    for (let j = 0; j < items.length; j++) if (j !== i) sum += similarity(vecs[i], vecs[j], one);
+    return sum / (items.length - 1);
+  });
+  return items
+    .map((it, i) => ({ it, s: score[i] }))
+    .sort((a, b) => b.s - a.s + (a.it.tier - b.it.tier) * 0.02 || a.it.published_at - b.it.published_at)
+    .map((x) => x.it);
+}
+
+/**
+ * Numele proprii dintr-un titlu, în forma originală (pentru căutări Wikidata/Commons fără AI):
+ * secvențe de 2–4 cuvinte cu majusculă, sau un singur cuvânt care nu e la început de propoziție.
+ * Numele generice (țări, agenții, publicații) sunt excluse.
+ */
+export function properNames(title: string): string[] {
+  const out: string[] = [];
+  const tokens = title.replace(/[„”"«»:;,.!?()[\]|/–—-]/g, " | ").split(/\s+/).filter(Boolean);
+  let cur: string[] = [];
+  let curStart = false;
+  let sentenceStart = true;
+  const flush = () => {
+    while (cur.length && /^(de|din|și|si)$/i.test(cur[cur.length - 1])) cur.pop();
+    const folded = cur.map((w) => fold(w).slice(0, 6)).join(" ");
+    const acronym = cur.length === 1 && /^[A-ZĂÂÎȘŞȚŢ]{2,6}$/.test(cur[0]);
+    const camel = cur.length === 1 && /^[A-ZĂÂÎȘŞȚŢ][a-zăâîșşțţ]+[A-Z]/.test(cur[0]);
+    if (cur.length >= 2 || (cur.length === 1 && (!curStart || camel) && !acronym)) {
+      if (!GENERIC_ENTITIES.has(folded) && cur.length <= 4) out.push(cur.join(" "));
+    }
+    // La început de propoziție, primul cuvânt poate fi unul obișnuit („Renovarea Turnului Eiffel”).
+    if (curStart && cur.length >= 3) out.push(cur.slice(1).join(" "));
+    cur = [];
+  };
+  for (const t of tokens) {
+    if (t === "|") {
+      if (cur.length) flush();
+      sentenceStart = true;
+      continue;
+    }
+    const cap = /^[A-ZĂÂÎȘŞȚŢ][a-zăâîșşțţ]+([A-Z][a-z]+)?(-[A-ZĂÂÎȘŞȚŢ][a-zăâîșşțţ]+)?$/.test(t) || /^[A-ZĂÂÎȘŞȚŢ]{2,6}$/.test(t);
+    if (cap || (cur.length && /^(de|din)$/.test(t))) {
+      if (!cur.length) curStart = sentenceStart;
+      cur.push(t);
+    } else if (cur.length) flush();
+    sentenceStart = false;
+  }
+  if (cur.length) flush();
+  return [...new Set(out)];
 }
 
 /** Similaritate cosinus ponderată TF-IDF, plus bonus pentru nume proprii și cifre comune. */
@@ -123,7 +202,7 @@ export function similarity(a: DocVector, b: DocVector, idf: (t: string) => numbe
   }
   let cos = na && nb ? dot / Math.sqrt(na * nb) : 0;
   let sharedEnt = 0;
-  for (const e of a.entities) if (b.entities.has(e)) sharedEnt++;
+  for (const e of a.entities) if (b.entities.has(e) && !GENERIC_ENTITIES.has(e)) sharedEnt++;
   let sharedNum = 0;
   for (const n of a.numbers) if (b.numbers.has(n)) sharedNum++;
   cos += Math.min(sharedEnt, 3) * 0.05 + Math.min(sharedNum, 2) * 0.06;
@@ -156,7 +235,7 @@ export function fingerprintSimilarity(a: string, b: string): number {
 
 const REGIONS: [RegionSlug, RegExp][] = [
   ["ucraina", /\b(ucrain|kiev|kyiv|zelenski|zelensky|rusia|rusiei|rusesc|ruse\b|rusi\b|putin\b|kremlin|moscov|donbas|harkov|odesa|crimeea)/],
-  ["moldova", /\b(moldov|chisinau|sandu|transnistr|gagauz)/],
+  ["moldova", /\b(moldov|chisinau|maia sandu|presedint[ae]i? sandu|transnistr|gagauz)/],
   ["orientul-mijlociu", /\b(israel|gaza|hamas|hezbollah|liban|iran|teheran|siria|irak|yemen|houthi|saudit|netanyahu|cisiordani|palestin)/],
   ["sua", /\b(sua\b|statele unite|washington|trump|casa alba|pentagon|congresul american|congresul sua|senatul american|new york|california|biden|vance|americani)/],
   ["asia", /\b(china|beijing|taiwan|japoni|tokyo|coreea|phenian|seul|india\b|pakistan|afganistan|indonezi|vietnam|filipin)/],

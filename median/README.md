@@ -17,7 +17,7 @@ articol primește automat o fotografie.
 | **Verificare** | Cifrele, citatele și numele trebuie să existe în surse. Textul nu are voie să copieze fraze din surse. Un al doilea apel AI caută afirmații nesusținute. |
 | **Subiecte sensibile** | Decesele, minorii și cazurile de justiție așteaptă aprobarea ta în `/admin`. |
 | **Știri scurte** | Subiectele cu o singură sursă primesc o știre scurtă originală, cu link către sursă. |
-| **Poze automate** | Poza vine, în ordine, din: poza publicației-sursă (doar la sursele marcate „Poze principale: DA” în /admin/surse, adică cele cu acord), portretul oficial Wikidata al persoanei/locului numit exact în știre, căutare pe Wikimedia Commons, apoi Unsplash/Pexels. Rezultatele căutărilor trec printr-un „editor foto” AI care respinge pozele fără legătură cu articolul (hărți, logo-uri, alte persoane). Ultima variantă e o copertă grafică generată. La celelalte surse, pozele apar doar ca miniaturi, cu credit. |
+| **Poze automate** | Poza vine, în ordine, din: poza publicației-sursă (doar la sursele marcate „Poze principale: DA” în /admin/surse, adică cele cu acord, sau pentru toate cu `MEDIAN_SOURCE_IMAGES=hero`), portretul oficial Wikidata al persoanei/locului numit exact în știre, căutare pe Wikimedia Commons, apoi Unsplash/Pexels. Poza sursei vine de la articolul cel mai reprezentativ al subiectului; se preferă poza al cărei nume de fișier se potrivește cu subiectul (nu una generică). Rezultatele căutărilor trec printr-un „editor foto” AI care respinge pozele fără legătură cu articolul; fără AI, se acceptă doar fișierele Commons care poartă exact numele (de minimum două cuvinte) din titlu. Ultima variantă e o copertă grafică generată. La celelalte surse, pozele apar doar ca miniaturi, cu credit. |
 | **Design** | Stil editorial „hârtie și cerneală”, cu temă luminoasă și întunecată. Funcționează pe mobil. |
 | **Transparență** | Eticheta AI apare pe fiecare articol (AI Act). Site-ul are pagini de politică editorială, politică AI, corecturi publice și formular pentru drepturi de autor. |
 | **SEO** | NewsArticle JSON-LD, sitemap Google News, RSS general și pe categorii. |
@@ -115,3 +115,11 @@ folosirea lor ca poză principală, pentru publicațiile cu care ai un acord, di
 | `test/` | Teste automate (`npm test`). |
 
 Sursele se editează în `lib/core/sources.ts`. Fiecare sursă e un rând: nume, site, flux, categorie.
+
+**Verificarea fluxurilor:** `npx tsx scripts/check/feeds.ts` încearcă fiecare flux și arată câte articole
+are, cât de nou e ultimul și câte au poză. Rulează-l după ce schimbi lista sau când `/admin` → Stare
+arată erori. Pe 26.09.2026 răspundeau 60 din 67 de fluxuri; B1 TV, Libertatea și EVZ limitau cererile
+(HTTP 429) de pe IP-ul de test, dar pe un server propriu ar trebui să meargă.
+
+**Proxy:** dacă serverul iese pe internet printr-un proxy, setează `HTTPS_PROXY` (și, opțional,
+`NO_PROXY`); colectarea, pozele și Wikimedia îl folosesc automat.

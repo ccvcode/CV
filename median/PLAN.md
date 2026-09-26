@@ -201,6 +201,26 @@ Cercetarea despre modele a arătat următoarele:
 | 8. Deploy | ✅ | `Dockerfile`, `docker-compose.yml` și `Caddyfile` validate; ghid în README |
 | 9. Etapa 2 (după lansare) | ⏳ | Telegram, web push, newsletter, Facebook |
 
-**Limita mediului de dezvoltare:** site-urile reale și API-urile AI nu sunt accesibile aici. Totul a fost
-testat pe rețeaua de știri simulată și cu un redactor AI simulat. La prima pornire pe server, verifică
-în `/admin` → Stare ce fluxuri reale răspund; unele adrese RSS pot fi schimbate de publicații.
+**Rulare pe știri reale (26.09.2026):** worker-ul a rulat pe cele 67 de fluxuri reale, fără AI
+(nu era setată nicio cheie), cu `MEDIAN_SOURCE_IMAGES=hero`. Ce s-a reparat:
+
+| Problemă găsită | Reparație |
+|---|---|
+| 11 fluxuri moarte sau greșite (RFI, Europa Liberă, Wall-Street, TVR Info, Bursa, G4Media Politică, 0-100.ro, Observator Cultural compromis cu spam, fluxurile ProTV „pe secțiuni” care întorc fluxul general) | Adrese noi sau înlocuitori (Mediafax pe secțiuni, News.ro Externe, Autocritica); `scripts/check/feeds.ts` verifică toate fluxurile |
+| Unele site-uri blocau User-Agent-ul „Chrome … MedianBot” | User-Agent onest de robot: `Mozilla/5.0 (compatible; MedianBot/2.0; +…)`; suport `HTTPS_PROXY` |
+| Știri diferite lipite în același subiect prin nume generice („SUA”, „AFP”, „Rusiei”): o insectă invazivă în subiectul „Iran–SUA, Ormuz” | Țările, blocurile, agențiile și publicațiile nu mai confirmă o grupare; regresie în `test/real-news.test.ts` |
+| Titlul și poza subiectului veneau de la cel mai vechi articol, chiar dacă era cel greșit | Articolul „central” (cel mai asemănător cu restul) dă titlul, rezumatul și prima poză |
+| Fără AI nu se alegea nicio poză principală | Jobul de imagine rulează și fără AI; entitățile vin din numele proprii din titluri |
+| Poze de 640–900px respinse, apoi copertă generată | Variante mari de la CDN-uri (`?width=`, reperio, WordPress); poză reală ≥720px înaintea copertei; `og:image` din pagină când RSS-ul n-are poză |
+| Poza generică a jurnalului TV („19s_p.webp”) aleasă în locul unei poze de reportaj | Se preferă poza al cărei nume de fișier se potrivește cu subiectul (inclusiv numele codate base64 de Digi24) |
+| Commons fără AI: „pavele din Alba” → planta *Nymphaea alba* | Fără AI se acceptă doar fișiere care conțin exact un nume de ≥2 cuvinte din titlu |
+| Wikimedia răspundea 429 la rafale | Cereri secvențiale, `Retry-After`, User-Agent cu contact, cache pe nume |
+| „Neti Sandu” (astrolog) clasificată la R. Moldova | Regula regiunii cere „Maia Sandu” / „președinta Sandu” |
+| Poze valide aruncate: citirea dimensiunilor prin proxy depășea 6s; originalele Digi24 (~20 MB) depășeau limita de 15 MB | Limite de 15s pentru dimensiuni, 40s și 30 MB pentru descărcare; variantă la mărimea reală pentru pozele de 600–720px |
+| Logo de partid ca poză principală („poza-sigla-aur.jpg”) | Filtrul de logo-uri recunoaște și „siglă” |
+| Fără AI, subsolul și semnătura spuneau „Redacția Median” / „sintetizează cu AI” | Text corect pentru modul agregator („Agregat din N publicații”) |
+
+Rezultat (1411 articole de la 60 de fluxuri, 722 de subiecte): 708 subiecte au poza reală din
+articolul-sursă, 2 au poză Wikimedia Commons, 12 au copertă generată (grafice promoționale cu text,
+logo-uri sau surse care au refuzat cererile). Verificat manual pe capturi de ecran (prima pagină,
+secțiuni, pagini de articol, mobil). Redactarea AI nu a fost testată pe date reale (lipsea cheia).
