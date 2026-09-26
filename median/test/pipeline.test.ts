@@ -16,6 +16,7 @@ process.env.MEDIAN_DATA_DIR = tmp;
 process.env.LLM_BASE_URL = "mock";
 process.env.MEDIAN_DEMO = "1"; // sursele de test sunt ale noastre: redactorul simulat le poate cita integral
 process.env.MEDIAN_WIKIMEDIA = "0";
+process.env.MEDIAN_SOURCE_IMAGES = "thumb"; // politica implicită din producție
 process.env.MEDIAN_REVIEW_SENSITIVE = "1";
 
 let server: http.Server;

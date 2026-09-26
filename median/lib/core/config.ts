@@ -73,7 +73,7 @@ export const config = {
 
   images: {
     /** „thumb”: pozele publicațiilor apar doar ca miniaturi; „hero”: pot fi și poza principală. */
-    sourceImages: str("MEDIAN_SOURCE_IMAGES", "thumb") as "thumb" | "hero",
+    sourceImages: str("MEDIAN_SOURCE_IMAGES", demo ? "hero" : "thumb") as "thumb" | "hero",
     unsplashKey: str("UNSPLASH_ACCESS_KEY"),
     pexelsKey: str("PEXELS_API_KEY"),
     commons: str("MEDIAN_WIKIMEDIA", demo ? "0" : "1") !== "0",

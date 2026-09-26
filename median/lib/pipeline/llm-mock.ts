@@ -4,6 +4,14 @@
  * create de noi), ca întregul flux să poată fi testat cap-coadă. Nu se folosește niciodată în producție.
  */
 
+import { STORIES } from "../../scripts/demo-network/content";
+
+/** Un AI real ar clasifica textul corect; simulatorul citește categoria din datele demo. */
+function demoTruth(titles: string[]): { category?: string; region?: string | null } {
+  for (const st of STORIES) if (st.versions.some((v) => titles.includes(v.title))) return { category: st.category, region: st.region ?? null };
+  return {};
+}
+
 interface MockSource {
   n: number;
   publication: string;
@@ -61,7 +69,9 @@ export function mockChat(target: "write" | "verify", schemaName: string, _system
   if (target === "verify") return reply({ ok: true, issues: [] });
 
   const sources = parseSources(user);
-  const category = /Categoria preliminară: ([a-z]+)/.exec(user)?.[1] ?? "national";
+  const truth = demoTruth(sources.map((s) => s.title));
+  const category = truth.category ?? /Categoria preliminară: ([a-z]+)/.exec(user)?.[1] ?? "national";
+  const region = truth.region ?? null;
   const allText = sources.flatMap((s) => [s.title, ...s.paragraphs]).join(" ");
   const tags = capitalized(allText).slice(0, 5);
   const entities = tags.slice(0, 4).map((name) => ({ name, type: "organizatie" }));
@@ -71,7 +81,7 @@ export function mockChat(target: "write" | "verify", schemaName: string, _system
     const s = sources[0];
     if (!s) return reply({ status: "insuficient" });
     const summary = [firstSentence(s.paragraphs[0] ?? s.title), s.paragraphs[1] ? firstSentence(s.paragraphs[1]) : ""].filter(Boolean).join(" ") + ` (potrivit ${s.publication})`;
-    return reply({ status: "ok", headline: s.title, summary, category, region: null, tags, entities, image_query: IMAGE_QUERY[category] ?? "news", sensitive: [] });
+    return reply({ status: "ok", headline: s.title, summary, category, region, tags, entities, image_query: IMAGE_QUERY[category] ?? "news", sensitive: [] });
   }
 
   if (sources.length < 1) return reply({ status: "insuficient" });
@@ -89,7 +99,7 @@ export function mockChat(target: "write" | "verify", schemaName: string, _system
     headline: a.title,
     dek: firstSentence(a.paragraphs[0] ?? a.title),
     category,
-    region: null,
+    region,
     key_points: sources.map((s) => firstSentence(s.paragraphs[1] ?? s.paragraphs[0] ?? s.title)).slice(0, 4),
     sections,
     why_it_matters: rest[0] ? firstSentence(rest[0].paragraphs[0] ?? "") : "",

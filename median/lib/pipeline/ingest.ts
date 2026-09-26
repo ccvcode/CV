@@ -6,7 +6,7 @@ import { hashId, slugify } from "../core/utils";
 import { httpGet } from "./http";
 import { enqueue } from "./jobs";
 import { parseFeed } from "./rss";
-import { detectRegion, detectSensitive, entities, fingerprint, fingerprintSimilarity, keywords } from "./text";
+import { classifyCategory, detectRegion, detectSensitive, docVector, fingerprint, fingerprintSimilarity, keywords, sameStory, type DocVector } from "./text";
 
 const WINDOW_MS = 36 * 3600_000;
 
@@ -143,9 +143,10 @@ interface ItemRow {
 }
 
 /**
- * Atribuie fiecărui articol nou un subiect (story). Două articole de la publicații diferite fac parte
- * din același subiect dacă titlurile împart suficiente cuvinte-cheie (inclusiv nume proprii) într-o
- * fereastră de 36 de ore. Preluările aproape identice (ex. din aceeași agenție) sunt marcate ca duplicate.
+ * Atribuie fiecărui articol nou un subiect (story). Un articol intră în subiectul celui mai asemănător
+ * articol recent de la altă publicație (TF-IDF pe titlu + început, confirmat de nume proprii sau cifre
+ * comune), într-o fereastră de 36 de ore. Preluările aproape identice sunt marcate ca duplicate.
+ * Calitatea este măsurată pe rețeaua demo cu scripts/eval/cluster-eval.ts.
  */
 export function clusterPending(now = Date.now()): number {
   const d = db();
@@ -155,39 +156,38 @@ export function clusterPending(now = Date.now()): number {
     .prepare("SELECT id, source_id, title, summary, category, published_at, story_id, fingerprint FROM items WHERE story_id IS NOT NULL AND published_at > ?")
     .all(now - WINDOW_MS - 12 * 3600_000) as ItemRow[];
 
-  type Entry = { row: ItemRow; kw: Set<string>; ent: Set<string> };
+  type Entry = { row: ItemRow; vec: DocVector };
+  const entries: Entry[] = recent.map((row) => ({ row, vec: docVector(row.title, row.summary) }));
+  const pendingEntries: Entry[] = pending.map((row) => ({ row, vec: docVector(row.title, row.summary) }));
+  // Frecvența documentelor (pentru IDF) pe toată fereastra.
+  const df = new Map<string, number>();
+  for (const e of [...entries, ...pendingEntries]) for (const t of Object.keys(e.vec.terms)) df.set(t, (df.get(t) ?? 0) + 1);
+  const N = Math.max(50, entries.length + pendingEntries.length);
+  const idf = (t: string) => Math.log(1 + N / (df.get(t) ?? 1));
+  // Index invers pe termeni, ca să comparăm doar cu candidații care au ceva în comun.
   const index = new Map<string, Entry[]>();
-  const add = (row: ItemRow) => {
-    const e: Entry = { row, kw: new Set(keywords(row.title)), ent: new Set(entities(row.title)) };
-    for (const k of e.kw) {
-      let l = index.get(k);
-      if (!l) index.set(k, (l = []));
+  const addToIndex = (e: Entry) => {
+    for (const t of Object.keys(e.vec.terms)) {
+      let l = index.get(t);
+      if (!l) index.set(t, (l = []));
       l.push(e);
     }
-    return e;
   };
-  for (const r of recent) add(r);
+  for (const e of entries) addToIndex(e);
 
   const touched = new Set<string>();
   const setStory = d.prepare("UPDATE items SET story_id = ?, duplicate_of = ? WHERE id = ?");
   d.transaction(() => {
-    for (const row of pending) {
-      const kw = new Set(keywords(row.title));
-      const ent = new Set(entities(row.title));
-      const counts = new Map<Entry, number>();
-      for (const k of kw) for (const e of index.get(k) ?? []) counts.set(e, (counts.get(e) ?? 0) + 1);
+    for (const e of pendingEntries) {
+      const row = e.row;
+      const candidates = new Set<Entry>();
+      for (const t of Object.keys(e.vec.terms)) for (const c of index.get(t) ?? []) candidates.add(c);
       let best: { e: Entry; score: number } | undefined;
-      for (const [e, shared] of counts) {
-        if (Math.abs(e.row.published_at - row.published_at) > WINDOW_MS) continue;
-        if (!e.row.story_id) continue;
-        const minSize = Math.max(1, Math.min(kw.size, e.kw.size));
-        const overlap = shared / minSize;
-        let sharedEnt = 0;
-        for (const x of ent) if (e.ent.has(x)) sharedEnt++;
-        const ok = (shared >= 3 && overlap >= 0.5) || (shared >= 2 && sharedEnt >= 1 && overlap >= 0.6) || (sharedEnt >= 2 && overlap >= 0.4);
-        if (!ok) continue;
-        const score = overlap + sharedEnt * 0.2 + (e.row.source_id === row.source_id ? -0.3 : 0);
-        if (!best || score > best.score) best = { e, score };
+      for (const c of candidates) {
+        if (!c.row.story_id || c.row.source_id === row.source_id) continue;
+        if (Math.abs(c.row.published_at - row.published_at) > WINDOW_MS) continue;
+        const r = sameStory(e.vec, c.vec, idf);
+        if (r.same && (!best || r.score > best.score)) best = { e: c, score: r.score };
       }
       let storyId = best?.e.row.story_id ?? null;
       let duplicateOf: string | null = null;
@@ -195,7 +195,7 @@ export function clusterPending(now = Date.now()): number {
       if (!storyId) storyId = createStory(row, now);
       setStory.run(storyId, duplicateOf, row.id);
       row.story_id = storyId;
-      add(row);
+      addToIndex(e);
       touched.add(storyId);
     }
   })();
@@ -234,7 +234,14 @@ export function refreshStory(storyId: string, now = Date.now()) {
   // Categoria: cea mai specifică (non-„național”) cea mai frecventă.
   const catCount = new Map<CategorySlug, number>();
   for (const it of items) catCount.set(it.category, (catCount.get(it.category) ?? 0) + (it.category === "national" ? 0.6 : 1));
-  const category = [...catCount.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  let category = [...catCount.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  // Fluxuri generale („național”): încercăm o clasificare după conținut. Articolul AI o rafinează.
+  if (category === "national") category = (classifyCategory(items.map((i) => i.title), items.map((i) => i.summary)) as CategorySlug | undefined) ?? "national";
+  // Dacă există deja un articol publicat, categoria aleasă de redactor are prioritate.
+  if (story.article_id) {
+    const a = d.prepare("SELECT s2.category FROM stories s2 WHERE s2.id = ?").get(storyId) as { category: CategorySlug };
+    category = a.category;
+  }
 
   const text = items.map((i) => i.title + " " + i.summary.slice(0, 400)).join(" ");
   const region = category === "international" ? detectRegion(text) ?? "lume" : null;

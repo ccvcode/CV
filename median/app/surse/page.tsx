@@ -1,59 +1,62 @@
 import type { Metadata } from "next";
-import { Favicon } from "@/components/Favicon";
-import { TimeAgo } from "@/components/TimeAgo";
-import { CATEGORY_MAP } from "@/lib/categories";
-import { OUTLETS } from "@/lib/sources";
-import { getSourceStatus, getState } from "@/lib/store";
+import { CATEGORY_MAP } from "@/lib/core/categories";
+import type { CategorySlug } from "@/lib/core/types";
+import { formatDate } from "@/lib/core/utils";
+import { outletsList, siteStatus } from "@/lib/data/queries";
 
-// Știrile stau în memoria serverului, deci randarea e rapidă: servim mereu varianta la zi.
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "Sursele noastre", description: "Lista completă a publicațiilor și fluxurilor RSS agregate de Median." };
+export const metadata: Metadata = { title: "Sursele noastre", description: "Publicațiile și fluxurile RSS urmărite de Median, cu starea lor în timp real." };
 
-const KIND: Record<string, string> = { tv: "Televiziune", online: "Publicație online", agentie: "Agenție de presă", presa: "Presă scrisă", international: "Serviciu internațional" };
-
-export default async function Sources() {
-  const state = await getState();
-  const status = getSourceStatus();
+export default function Sources() {
+  const outlets = outletsList();
+  const st = siteStatus();
   return (
-    <main className="mx-auto max-w-7xl px-4 pb-10 pt-8 sm:px-6">
-      <h1 className="font-display text-4xl font-black sm:text-5xl">Sursele noastre</h1>
-      <p className="mt-3 max-w-2xl text-ink-muted">
-        Median preia automat, la fiecare 5 minute, titlurile și rezumatele din fluxurile RSS publice ale acestor publicații. Fiecare articol trimite către
-        sursa originală. Acum sunt active <b className="text-ink">{state.sourcesOk}</b> din {state.sourcesTotal} fluxuri
-        {state.updatedAt ? <> · ultima colectare <TimeAgo ts={state.updatedAt} /></> : null}.
+    <main className="mx-auto max-w-[1320px] px-4 sm:px-8">
+      <header className="pt-10">
+        <div className="kicker text-ink-3">Transparență</div>
+        <h1 className="section-head mt-1 text-[44px] sm:text-[72px]">Sursele noastre</h1>
+        <p className="dek mt-3 max-w-3xl text-[20px]">
+          Median urmărește {st.outlets} publicații prin {st.sourcesTotal} fluxuri RSS publice. La fiecare 5 minute verifică fluxurile, grupează
+          articolele despre același subiect și redactează o sinteză cu trimitere la fiecare sursă.
+        </p>
+        <div className="mt-4 h-[2px] bg-rule-strong" />
+      </header>
+      <table className="ui mt-6 w-full text-[14px]">
+        <thead>
+          <tr className="kicker border-b border-rule text-left text-ink-3">
+            <th className="py-2 font-bold">Publicație</th>
+            <th className="hidden py-2 font-bold sm:table-cell">Secțiuni</th>
+            <th className="py-2 text-right font-bold">Fluxuri active</th>
+            <th className="hidden py-2 text-right font-bold md:table-cell">Ultima verificare</th>
+          </tr>
+        </thead>
+        <tbody>
+          {outlets.map((o) => (
+            <tr key={o.name} className="border-b border-rule">
+              <td className="py-2.5">
+                <a href={o.site} target="_blank" rel="noopener noreferrer" className="font-semibold hover:underline">
+                  {o.name}
+                </a>
+              </td>
+              <td className="hidden py-2.5 text-ink-2 sm:table-cell">
+                {[...new Set(o.categories.split(","))].map((c) => CATEGORY_MAP[c as CategorySlug]?.short ?? c).join(", ")}
+              </td>
+              <td className="mono py-2.5 text-right">
+                <span className={o.ok === 0 ? "text-accent-ink" : ""}>
+                  {o.ok}/{o.feeds}
+                </span>
+              </td>
+              <td className="mono hidden py-2.5 text-right text-ink-3 md:table-cell" suppressHydrationWarning>
+                {o.last_fetch ? formatDate(o.last_fetch) : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="meta mt-6 max-w-3xl">
+        Respectăm fișierele robots.txt și rezervările de exploatare a textelor (TDM) ale fiecărui site. Agenția Agerpres nu este preluată, fiind un
+        serviciu cu abonament. Publicațiile care nu doresc să fie incluse ne pot scrie la pagina Contact.
       </p>
-      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {OUTLETS.map((o) => {
-          const count = state.articles.filter((a) => a.sourceName === o.name).length;
-          const okFeeds = o.feeds.filter((f) => status[f.id]?.ok).length;
-          return (
-            <div key={o.name} className="rounded-2xl border border-line bg-surface p-5">
-              <div className="flex items-center gap-3">
-                <Favicon name={o.name} site={o.site} size={36} />
-                <div className="min-w-0">
-                  <a href={o.site} target="_blank" rel="noopener noreferrer" className="block truncate font-semibold hover:text-brand">
-                    {o.name}
-                  </a>
-                  <div className="text-xs text-ink-muted">{KIND[o.kind ?? "online"]}</div>
-                </div>
-                <span
-                  className="ml-auto h-2.5 w-2.5 shrink-0 rounded-full"
-                  style={{ background: okFeeds ? "var(--live)" : Object.keys(status).length ? "var(--breaking)" : "var(--ink-faint)" }}
-                  title={okFeeds ? "Activ" : "Indisponibil momentan"}
-                />
-              </div>
-              <div className="mt-4 flex flex-wrap gap-1.5">
-                {o.feeds.map((f) => (
-                  <span key={f.id} className="rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ color: CATEGORY_MAP[f.category].color, background: `color-mix(in oklab, ${CATEGORY_MAP[f.category].color} 12%, transparent)` }}>
-                    {CATEGORY_MAP[f.category].short}
-                  </span>
-                ))}
-              </div>
-              <div className="mt-3 text-xs text-ink-faint">{count} articole în ultimele zile</div>
-            </div>
-          );
-        })}
-      </div>
     </main>
   );
 }

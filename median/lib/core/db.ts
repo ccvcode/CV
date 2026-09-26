@@ -197,6 +197,18 @@ const MIGRATIONS: string[] = [
     tokenize = 'unicode61 remove_diacritics 2'
   );
   `,
+  // 2 — semnalările cititorilor (corecturi, drepturi de autor)
+  `
+  CREATE TABLE reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    story_id TEXT,
+    email TEXT,
+    message TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'nou',
+    created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 type DB = Database.Database;

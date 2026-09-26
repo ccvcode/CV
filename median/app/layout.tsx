@@ -1,63 +1,97 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import "./globals.css";
-import { Header } from "@/components/Header";
-import { Footer } from "@/components/Footer";
-import { BottomNav } from "@/components/BottomNav";
-import { UtilityBar } from "@/components/UtilityBar";
-import { themeScript } from "@/components/ThemeToggle";
-import { getState } from "@/lib/store";
-import { getRates, getWeather } from "@/lib/widgets";
-
-const SITE = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+import { Footer } from "@/components/footer";
+import { Masthead, themeScript } from "@/components/masthead";
+import { config } from "@/lib/core/config";
+import { outletsList, siteStatus } from "@/lib/data/queries";
+import { getRates, getWeather } from "@/lib/data/widgets";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(SITE),
-  title: { default: "Median — Știri din România și din lume, actualizate la 5 minute", template: "%s · Median" },
+  metadataBase: new URL(config.siteUrl),
+  title: { default: "Median — Știrile zilei, cântărite", template: "%s · Median" },
   description:
-    "Median adună automat știrile din zeci de publicații românești și le grupează pe subiecte: actualitate, politică, economie, internațional, sport, tech, lifestyle și multe altele.",
+    "Median sintetizează știrile din zeci de publicații românești: un singur articol complet pe subiect, cu toate sursele la vedere. Actualizat la fiecare 5 minute.",
   applicationName: "Median",
-  keywords: ["știri", "stiri", "România", "ultima oră", "agregator", "actualitate", "politică", "economie", "sport"],
   openGraph: { type: "website", siteName: "Median", locale: "ro_RO" },
   twitter: { card: "summary_large_image" },
-  alternates: { types: { "application/rss+xml": "/feed.xml" } },
+  alternates: { types: { "application/rss+xml": "/rss.xml" } },
+  robots: { index: true, follow: true, "max-image-preview": "large" },
 };
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#fafaf7" },
-    { media: "(prefers-color-scheme: dark)", color: "#0e0f12" },
+    { media: "(prefers-color-scheme: light)", color: "#f4f1ea" },
+    { media: "(prefers-color-scheme: dark)", color: "#121110" },
   ],
   width: "device-width",
   initialScale: 1,
-  viewportFit: "cover",
 };
 
-// Știrile stau în memoria serverului, deci randarea e rapidă: servim mereu varianta la zi.
 export const dynamic = "force-dynamic";
 
+const WEATHER: [number, string][] = [
+  [0, "senin"],
+  [2, "parțial noros"],
+  [3, "înnorat"],
+  [48, "ceață"],
+  [57, "burniță"],
+  [67, "ploaie"],
+  [77, "ninsoare"],
+  [82, "averse"],
+  [86, "ninsoare"],
+  [99, "furtună"],
+];
+
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const [state, rates, weather] = await Promise.all([getState(), getRates(), getWeather()]);
+  const [rates, weather] = await Promise.all([getRates().catch(() => null), getWeather().catch(() => null)]);
+  const status = siteStatus();
+  const outlets = outletsList().map((o) => o.name);
+  const buc = weather?.[0];
+  const eur = rates?.rates.find((r) => r.code === "EUR");
+  const usd = rates?.rates.find((r) => r.code === "USD");
+  const utility = (
+    <>
+      {buc && (
+        <span>
+          București <b className="mono font-medium text-ink">{buc.temp}°</b> · {WEATHER.find(([c]) => buc.code <= c)?.[1]}
+        </span>
+      )}
+      {eur && (
+        <span>
+          EUR <b className="mono font-medium text-ink">{eur.value.toFixed(4).replace(".", ",")}</b>
+        </span>
+      )}
+      {usd && (
+        <span>
+          USD <b className="mono font-medium text-ink">{usd.value.toFixed(4).replace(".", ",")}</b>
+        </span>
+      )}
+      <span className="hidden lg:inline">
+        {status.outlets} publicații · {status.sourcesOk}/{status.sourcesTotal} fluxuri active
+      </span>
+    </>
+  );
   return (
     <html lang="ro" suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
-      </head>
-      <body className="min-h-dvh">
-        <a href="#continut" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded-lg focus:bg-brand focus:px-4 focus:py-2 focus:text-white">
+      <body>
+        <Script id="tema" strategy="beforeInteractive">
+          {themeScript}
+        </Script>
+        <a href="#continut" className="ui sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:bg-ink focus:px-3 focus:py-2 focus:text-on-ink">
           Sari la conținut
         </a>
-        <Header utility={<UtilityBar rates={rates} weather={weather} updatedAt={state.updatedAt} sourcesOk={state.sourcesOk} />} />
-        {state.demo && (
-          <div className="border-b border-amber-300/50 bg-amber-100 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-            <p className="mx-auto max-w-7xl px-4 py-2 text-center text-xs sm:px-6">
-              <b>Mod demo:</b> serverul nu poate accesa momentan sursele de știri, așa că afișăm conținut demonstrativ. Știrile reale apar automat
-              imediat ce conexiunea este disponibilă.
+        <Masthead utility={utility} />
+        {status.demo && (
+          <div className="ui border-b border-rule bg-surface">
+            <p className="mx-auto max-w-[1320px] px-4 py-2 text-[12px] text-ink-2 sm:px-8">
+              <b className="text-ink">Mod demonstrativ.</b> Publicațiile, persoanele și știrile afișate sunt fictive, generate pentru testarea
+              sistemului. În producție, Median preia fluxurile reale ale publicațiilor românești.
             </p>
           </div>
         )}
         <div id="continut">{children}</div>
-        <Footer sourcesTotal={state.sourcesTotal} />
-        <BottomNav />
+        <Footer outlets={outlets} />
       </body>
     </html>
   );

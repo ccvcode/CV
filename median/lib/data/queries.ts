@@ -140,7 +140,8 @@ function cards(rows: StoryRow[]): StoryCard[] {
       kind,
       sourceCount: Math.max(r.source_count, outlets.length),
       sources: outlets,
-      published: r.a_published ?? r.first_published_at,
+      // Momentul în care a apărut știrea (primul raport), nu momentul redactării sintezei.
+      published: r.first_published_at,
       updated: Math.max(r.last_published_at, r.a_updated ?? 0),
       hero: imageById(r.hero_image_id),
       thumb: imageById(thumbItem?.thumb_image_id),
@@ -177,9 +178,9 @@ export function latestStories(opts: { limit: number; offset?: number; category?:
   const where = [visibility()];
   if (opts.category) where.push("s.category = @category");
   if (opts.region) where.push("s.region = @region");
-  if (opts.before) where.push("COALESCE(a.published_at, s.first_published_at) < @before");
+  if (opts.before) where.push("s.first_published_at < @before");
   const rows = db()
-    .prepare(`${STORY_SELECT} WHERE ${where.join(" AND ")} ORDER BY COALESCE(a.published_at, s.first_published_at) DESC LIMIT @lim OFFSET @off`)
+    .prepare(`${STORY_SELECT} WHERE ${where.join(" AND ")} ORDER BY s.first_published_at DESC LIMIT @lim OFFSET @off`)
     .all({ category: opts.category ?? null, region: opts.region ?? null, before: opts.before ?? null, lim: opts.limit, off: opts.offset ?? 0 }) as StoryRow[];
   return cards(rows);
 }
@@ -202,7 +203,7 @@ export function mostRead(limit = 10): { stories: StoryCard[]; byViews: boolean }
 
 export function breakingStories(limit = 8): StoryCard[] {
   const rows = db()
-    .prepare(`${STORY_SELECT} WHERE ${visibility()} AND s.last_published_at > @since AND (s.breaking = 1 OR s.source_count >= 2) ORDER BY COALESCE(a.published_at, s.first_published_at) DESC LIMIT @lim`)
+    .prepare(`${STORY_SELECT} WHERE ${visibility()} AND s.last_published_at > @since AND (s.breaking = 1 OR s.source_count >= 2) ORDER BY s.breaking DESC, s.first_published_at DESC LIMIT @lim`)
     .all({ since: Date.now() - 6 * 3600_000, lim: limit }) as StoryRow[];
   return cards(rows);
 }

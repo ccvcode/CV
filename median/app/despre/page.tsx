@@ -1,44 +1,37 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Layers, RefreshCw, ShieldCheck, Zap } from "lucide-react";
-import { Logo } from "@/components/Logo";
+import { PageShell } from "@/components/page-shell";
+import { config } from "@/lib/core/config";
 
 export const metadata: Metadata = { title: "Despre Median" };
 
-const FEATURES = [
-  { icon: RefreshCw, title: "Actualizat la 5 minute", text: "Un colector automat verifică toate sursele la fiecare 5 minute și aduce știrile noi fără să reîncarci pagina." },
-  { icon: Layers, title: "Grupare pe subiecte", text: "Articolele despre același eveniment sunt grupate, ca să vezi câte surse relatează și cine a scris primul." },
-  { icon: ShieldCheck, title: "Respect pentru surse", text: "Afișăm doar titlul, un scurt extras și imaginea din fluxul public, cu link direct către articolul original." },
-  { icon: Zap, title: "Rapid și modern", text: "Temă luminoasă și întunecată, căutare instantă, articole salvate și o interfață gândită mai întâi pentru telefon." },
-];
-
 export default function About() {
   return (
-    <main className="mx-auto max-w-4xl px-4 pb-10 pt-12 sm:px-6">
-      <Logo size="lg" />
-      <h1 className="font-display mt-6 text-4xl font-black leading-tight sm:text-6xl">Toate sursele. Un singur loc.</h1>
-      <p className="mt-5 max-w-2xl text-lg text-ink-muted">
-        Median este un agregator de știri din România și din lume. Numele vine de la <i>mediană</i> — valoarea din mijloc: vrem să-ți arătăm
-        imaginea completă a unui subiect, așa cum este relatat de publicații diferite.
+    <PageShell kicker="Redacția" title="Despre Median" dek="Știrile zilei, cântărite. Un singur articol complet pe subiect, cu toate sursele la vedere.">
+      <p className="dropcap">
+        Median pornește de la o idee simplă: aceeași știre apare în zeci de publicații, cu titluri diferite și detalii răspândite. Median
+        urmărește fluxurile publice ale publicațiilor românești, recunoaște când mai multe redacții relatează același eveniment și redactează o
+        singură sinteză completă, care reunește faptele din toate sursele și trimite la fiecare dintre ele.
       </p>
-      <div className="mt-12 grid gap-4 sm:grid-cols-2">
-        {FEATURES.map(({ icon: Icon, title, text }) => (
-          <div key={title} className="rounded-3xl border border-line bg-surface p-6">
-            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-soft text-brand">
-              <Icon className="h-5 w-5" />
-            </span>
-            <h2 className="mt-4 font-display text-xl font-bold">{title}</h2>
-            <p className="mt-1.5 text-sm leading-relaxed text-ink-muted">{text}</p>
-          </div>
-        ))}
-      </div>
-      <div className="mt-12 rounded-3xl bg-surface-2 p-6 text-sm leading-relaxed text-ink-muted">
-        <h2 className="font-display text-lg font-bold text-ink">Drepturi de autor</h2>
-        <p className="mt-2">
-          Conținutul articolelor aparține publicațiilor care le-au scris. Dacă reprezinți o publicație și dorești eliminarea fluxului tău din Median,
-          scrie-ne și îl scoatem imediat. Vezi <Link href="/surse" className="font-semibold text-brand">lista completă a surselor</Link>.
-        </p>
-      </div>
-    </main>
+      <h2>Cum funcționează</h2>
+      <ul>
+        <li>La fiecare 5 minute, sistemul verifică fluxurile RSS ale publicațiilor (lista completă e pe pagina <Link href="/surse">Surse</Link>).</li>
+        <li>Articolele despre același eveniment sunt grupate într-un subiect. Contează câte redacții diferite îl relatează.</li>
+        <li>Pentru subiectele relatate de cel puțin două publicații, un model de inteligență artificială redactează o sinteză originală, folosind exclusiv faptele din surse.</li>
+        <li>Fiecare text este verificat automat: cifrele, numele și citatele trebuie să se regăsească în surse, iar formularea nu are voie să copieze textele originale.</li>
+        <li>Subiectele sensibile (decese, minori, justiție) sunt aprobate de un om înainte de publicare.</li>
+      </ul>
+      <h2>Ce nu facem</h2>
+      <ul>
+        <li>Nu copiem articolele altor publicații și nu folosim fotografiile lor ca imagini principale.</li>
+        <li>Nu inventăm autori. Articolele sunt semnate „Redacția Median” și sunt marcate ca redactate cu AI.</li>
+        <li>Nu folosim imagini generate de AI pentru știri.</li>
+      </ul>
+      <p>
+        Detalii în <Link href="/politica-editoriala">Politica editorială</Link> și <Link href="/politica-ai">Politica de utilizare a AI</Link>. Contact:{" "}
+        <a href={`mailto:${config.contactEmail}`}>{config.contactEmail}</a>
+        {config.company ? `. Editor: ${config.company}.` : "."}
+      </p>
+    </PageShell>
   );
 }

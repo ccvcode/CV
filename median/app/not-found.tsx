@@ -2,13 +2,15 @@ import Link from "next/link";
 
 export default function NotFound() {
   return (
-    <main className="mx-auto flex max-w-xl flex-col items-center px-4 py-24 text-center">
-      <div className="numeral text-[8rem] leading-none">404</div>
-      <h1 className="font-display mt-4 text-3xl font-bold">Pagina nu mai este aici</h1>
-      <p className="mt-3 text-ink-muted">Știrile vechi sunt arhivate automat după câteva zile. Poate găsești ce cauți printre cele mai noi.</p>
-      <div className="mt-8 flex gap-3">
-        <Link href="/" className="rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-bg">Prima pagină</Link>
-        <Link href="/cauta" className="rounded-full border border-line px-5 py-2.5 text-sm font-semibold">Caută</Link>
+    <main className="mx-auto max-w-[1320px] px-4 py-24 sm:px-8">
+      <div className="max-w-2xl border-t-2 border-rule-strong pt-4">
+        <div className="mono text-[13px] text-ink-3">404</div>
+        <h1 className="section-head mt-2 text-[44px] sm:text-[64px]">Pagina nu există</h1>
+        <p className="dek mt-4 text-[20px]">Poate a fost mutată sau subiectul a fost retras. Găsești cele mai noi știri pe prima pagină.</p>
+        <div className="ui mt-6 flex gap-6 text-[14px] font-semibold">
+          <Link href="/" className="underline underline-offset-4">Prima pagină</Link>
+          <Link href="/cauta" className="underline underline-offset-4">Căutare</Link>
+        </div>
       </div>
     </main>
   );
