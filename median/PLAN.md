@@ -175,17 +175,32 @@ cu internet și cheile setate, sistemul folosește sursele reale.
 
 ---
 
-## 8. Decizii care îți aparțin
+## 8. Decizii luate
 
-1. **Modelul AI și costul** (per articol: redactare + verificare):
-   - **Claude Opus 5** (calitate maximă): ~$0,10/articol, adică ~$300/lună la 100 de articole pe zi;
-   - **Claude Sonnet 5 + Haiku 4.5 pentru verificare** (echilibrat): ~$0,044/articol, adică ~$130/lună la 100 pe zi;
-   - **Haiku 4.5** (economic): ~$0,027/articol, adică ~$80/lună la 100 pe zi.
-   Modelul se poate schimba oricând din setări. Plafonul zilnic de cost e configurabil.
-2. **Publicare:** complet automată (cu etichetă AI) sau revizuire umană pentru categoriile sensibile (justiție, politică,
-   decese). Recomandat: automat, cu subiectele sensibile ținute pentru aprobare.
-3. **Chei de obținut** (toate gratuite, în afară de Claude):
-   - `ANTHROPIC_API_KEY`;
-   - `UNSPLASH_ACCESS_KEY` și `PEXELS_API_KEY` (opționale; fără ele se folosesc Commons și coperta generată).
-4. **Hosting:** VPS (recomandat) sau Vercel.
-5. **Domeniu, date firmă și e-mail de contact**, pentru paginile legale.
+| Decizie | Alegere |
+|---|---|
+| Redactorul AI | **DeepSeek** (`deepseek-flash`, ~$8–17/lună la 100 de articole pe zi). Sistemul acceptă orice API compatibil OpenAI: Scaleway în UE sau Ollama local, schimbabil din `.env`. |
+| Publicare | Automată, cu etichetă AI. Subiectele sensibile (decese, minori, justiție) așteaptă aprobare în `/admin`. |
+| Hosting | VPS cu Docker Compose: Caddy (HTTPS automat), web, worker și backup zilnic. |
+
+Cercetarea despre modele a arătat următoarele:
+- Modelele locale cer un server de €230+/lună (ideal cu placă video) și scriu mai slab în română.
+- DeepSeek procesează datele în China. Pentru date doar în UE, varianta e Scaleway (Paris), care servește același model.
+
+## 9. Stare implementare
+
+| Etapă | Stare | Verificare |
+|---|---|---|
+| 1. Fundație (SQLite, worker, coadă, colectare, grupare) | ✅ | Test de integrare cap-coadă; gruparea: precizie 1,00 / recall 0,80 pe rețeaua demo (`test/cluster.test.ts`) |
+| 2. Text complet | ✅ | Testat pe 5 tipuri de pagini + rețeaua demo; respectă robots.txt/TDM |
+| 3. Redacția AI | ✅ | Prompt editorial, verificare în cod (cifre, citate, nume, text copiat) + verificare AI, subiecte sensibile la aprobare, buget zilnic |
+| 4. Imagini automate | ✅ | Miniaturi din surse (cu detectarea logo-urilor și a pozelor implicite), Wikidata/Commons, Unsplash/Pexels, copertă generată |
+| 5. Redesign | ✅ | Desktop, mobil, temă întunecată; fără erori în consolă |
+| 6. SEO și transparență | ✅ | JSON-LD, sitemap Google News, RSS, pagini legale, etichete AI, corecturi |
+| 7. Admin | ✅ | Login, aprobare, subiecte, surse, semnalări, stare și costuri (testat în browser) |
+| 8. Deploy | ✅ | `Dockerfile`, `docker-compose.yml` și `Caddyfile` validate; ghid în README |
+| 9. Etapa 2 (după lansare) | ⏳ | Telegram, web push, newsletter, Facebook |
+
+**Limita mediului de dezvoltare:** site-urile reale și API-urile AI nu sunt accesibile aici. Totul a fost
+testat pe rețeaua de știri simulată și cu un redactor AI simulat. La prima pornire pe server, verifică
+în `/admin` → Stare ce fluxuri reale răspund; unele adrese RSS pot fi schimbate de publicații.

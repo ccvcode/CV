@@ -2,7 +2,7 @@ import probe from "probe-image-size";
 import { config } from "../../core/config";
 import { db } from "../../core/db";
 import type { ImageCandidate } from "../../core/types";
-import { httpGetBuffer } from "../http";
+import { assertPublicUrl, httpGetBuffer } from "../http";
 import { processImage, saveImageRow, type Processed } from "./store";
 
 const REJECT_URL = /(logo|favicon|placeholder|default[-_]?(image|img|share|og)?|avatar|sprite|pixel|1x1|spacer|blank|\/ads?\/|banner|share-default|no-image|noimage|icon)/i;
@@ -14,6 +14,7 @@ export interface ScoredCandidate extends ImageCandidate {
 /** Citește doar antetul fișierului pentru a afla dimensiunile (fără a descărca toată imaginea). */
 async function probeSize(url: string, referer: string): Promise<{ width: number; height: number; type: string } | undefined> {
   try {
+    await assertPublicUrl(url);
     const r = await probe(url, { timeout: 6000, headers: { "user-agent": config.userAgent, referer } });
     return { width: r.width, height: r.height, type: r.type };
   } catch {

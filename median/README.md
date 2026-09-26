@@ -1,76 +1,117 @@
-# Median — știri din România și din lume
+# Median — Știrile zilei, cântărite
 
-**Median** este un agregator modern de știri, inspirat de media24.ro. Colectează automat,
-**la fiecare 5 minute**, știrile din peste 70 de fluxuri RSS ale publicațiilor românești
-(Digi24, HotNews, G4Media, Știrile ProTV, Libertatea, Adevărul, ZF, Profit, GSP, Digi Sport,
-Europa Liberă, RFI și multe altele). Le grupează pe subiecte și le afișează cu imagini, rezumate
-și link către sursa originală.
+Median este o redacție de știri automată pentru România. La fiecare 5 minute urmărește fluxurile a
+~50 de publicații. Recunoaște când mai multe redacții relatează același subiect. Apoi un model AI
+scrie **un singur articol complet și original** pentru subiect, cu toate sursele la vedere. Fiecare
+articol primește automat o fotografie.
 
-## Ce include
+> Planul complet și concluziile research-ului sunt în [PLAN.md](PLAN.md).
 
-- **Colectare automată la 5 minute**, cu imagini (din RSS sau `og:image` din pagina articolului),
-  deduplicare, normalizarea diacriticelor (ş/ţ → ș/ț) și arhivă locală de 7 zile.
-- **Categorii:** Național, Politică, Economie, Internațional, Sport, Tech & Știință, Lifestyle,
-  Sănătate, Auto, Cultură, Monden.
-- **Gruparea pe subiecte:** „3 surse relatează”, cronologie „cine a scris primul”.
-- **Prima pagină modernă:** bandă „Ultima oră”, hero bento, „Subiectele zilei”, flux live
-  „Pe scurt”, „Cele mai citite / mediatizate”, secțiuni pe categorii, galerie „Ziua în imagini”.
-- **Widget-uri:** vremea în 7 orașe (Open-Meteo), curs valutar BNR cu grafice, cutremure recente (USGS).
-- **Știri noi fără refresh:** un buton discret „↑ 5 știri noi” apare când serverul a adus noutăți.
-- Temă luminoasă/întunecată, căutare (⌘K), articole salvate, bară de progres la citire,
-  navigare de jos pe mobil, PWA, flux RSS propriu (`/feed.xml`), sitemap și SEO.
+## Ce face, pe scurt
 
-## Pornire locală
+| | |
+|---|---|
+| **Colectare** | ~70 de fluxuri RSS, la 5 minute. Folosește cereri condiționate (ETag), iar sursele căzute sunt reîncercate automat mai rar. |
+| **Grupare pe subiecte** | Articolele despre același eveniment devin un singur subiect. Precizie măsurată: 100% pe datele de test. |
+| **Articole complete** | Pentru subiectele cu ≥2 publicații, AI-ul citește textul integral al surselor și scrie o sinteză de 400–800 de cuvinte. Sinteza are titlu, „Pe scurt”, secțiuni, „De ce contează”, citate și sursele. |
+| **Verificare** | Cifrele, citatele și numele trebuie să existe în surse. Textul nu are voie să copieze fraze din surse. Un al doilea apel AI caută afirmații nesusținute. |
+| **Subiecte sensibile** | Decesele, minorii și cazurile de justiție așteaptă aprobarea ta în `/admin`. |
+| **Știri scurte** | Subiectele cu o singură sursă primesc o știre scurtă originală, cu link către sursă. |
+| **Poze automate** | Poza vine, în ordine, din: Wikidata/Wikimedia Commons (persoane, instituții, locuri), apoi Unsplash/Pexels, apoi o copertă grafică generată. Pozele publicațiilor apar doar ca miniaturi, cu credit. |
+| **Design** | Stil editorial „hârtie și cerneală”, cu temă luminoasă și întunecată. Funcționează pe mobil. |
+| **Transparență** | Eticheta AI apare pe fiecare articol (AI Act). Site-ul are pagini de politică editorială, politică AI, corecturi publice și formular pentru drepturi de autor. |
+| **SEO** | NewsArticle JSON-LD, sitemap Google News, RSS general și pe categorii. |
+| **Administrare** | Din `/admin`: aprobare, ascundere, fixare, „Ultima oră”, corecturi, surse, costuri AI și jurnal. |
+
+## Pornire rapidă (demo, pe calculatorul tău)
+
+Ai nevoie de [Node.js 22](https://nodejs.org).
 
 ```bash
 cd median
 npm install
-npm run dev        # http://localhost:3000
+npm run build
+npm run demo          # pornește rețeaua de știri simulată + colectarea (lasă-l deschis)
+# în alt terminal:
+MEDIAN_DEMO=1 npm start   # site-ul, la http://localhost:3000
 ```
 
-Pentru producție: `npm run build && npm start`.
+Modul demo folosește **10 publicații fictive** și un redactor AI simulat. Nu are nevoie de internet
+sau de chei, iar site-ul arată un banner „Mod demonstrativ”.
 
-Dacă serverul nu are acces la internet, site-ul afișează un banner **„Mod demo”** cu articole
-demonstrative. Știrile reale apar automat când sursele devin accesibile.
+## Publicare online (recomandat: server propriu cu Docker)
 
-## Publicare online
+1. **Închiriază un server** Linux în UE, de exemplu Hetzner sau DigitalOcean. Ajung 2 vCPU și 4 GB RAM,
+   la circa €6–25/lună. Instalează [Docker](https://docs.docker.com/engine/install/).
+2. **Îndreaptă domeniul** spre IP-ul serverului: o înregistrare DNS de tip A.
+3. **Pe server:**
+   ```bash
+   git clone <repo> && cd <repo>/median
+   cp .env.example .env
+   nano .env        # completează domeniul, parola de admin și cheia AI
+   docker compose up -d --build
+   ```
+4. Gata:
+   - site-ul rulează pe `https://domeniul-tau.ro`, iar certificatul HTTPS e automat;
+   - panoul de administrare e la `/admin`;
+   - bazele de date sunt salvate zilnic în `backups/`.
 
-### Varianta 1: VPS sau Docker (recomandat)
+**Actualizare:** `git pull && docker compose up -d --build`.
 
-Pe un server care rulează permanent, colectarea la 5 minute pornește singură
-(vezi `instrumentation.ts`).
+**Monitorizare:** adaugă `https://domeniul-tau.ro/api/health` într-un serviciu gratuit precum
+UptimeRobot. Răspunde cu eroare dacă nicio colectare nu a reușit în ultimele 20 de minute.
 
-```bash
-docker build -t median .
-docker run -d -p 3000:3000 -v median-data:/data -e NEXT_PUBLIC_SITE_URL=https://domeniul-tau.ro median
-```
+## Redactorul AI
 
-Merge la fel pe Railway, Render sau Fly.io. Setează directorul rădăcină la `median`.
+Median funcționează cu orice API compatibil OpenAI. Totul se configurează în `.env`.
 
-### Varianta 2: Vercel
+| Opțiune | Setări | Cost estimat, 100 articole/zi |
+|---|---|---|
+| **DeepSeek** (implicit) | `LLM_BASE_URL=https://api.deepseek.com`, `LLM_MODEL=deepseek-flash` | ~$8–17/lună |
+| **Scaleway** (Paris, date în UE) | `LLM_BASE_URL=https://api.scaleway.ai/v1`, `LLM_MODEL=deepseek-v4-flash-0731`, `LLM_JSON_MODE=json_schema` | ~€18/lună |
+| **Local (Ollama)** | `LLM_BASE_URL=http://ollama:11434/v1`, `LLM_MODEL=gemma4:26b`, `LLM_JSON_MODE=json_schema` | serverul: €230+/lună; recomandat cu placă video |
 
-1. Importă repository-ul în Vercel și setează **Root Directory** = `median`.
-2. Adaugă variabilele `NEXT_PUBLIC_SITE_URL` și, opțional, `CRON_SECRET`.
-3. Știrile se colectează automat când datele sunt mai vechi de 5 minute (la prima vizită după acest interval).
-4. Opțional, pentru colectare strict la 5 minute indiferent de trafic, setează în GitHub secretele
-   `MEDIAN_URL` și `CRON_SECRET`. Workflow-ul `.github/workflows/median-refresh.yml` va apela
-   `/api/refresh` la fiecare 5 minute.
+- **DeepSeek și GDPR:** datele sunt procesate în China. Pentru articole de presă publice riscul e mic,
+  dar dacă vrei date exclusiv în UE, folosește Scaleway.
+- **Bugetul zilnic:** `LLM_DAILY_BUDGET_USD` oprește automat redactarea când e atins și o reia a doua zi.
+- **Costul la zi** apare în `/admin`.
+- **Fără cheie AI**, site-ul funcționează ca agregator: titluri, miniaturi și linkuri către surse.
+
+## Imagini
+
+| Sursă | Cheie | Folosire |
+|---|---|---|
+| Wikidata / Wikimedia Commons | nu | Portrete oficiale, instituții, locuri. Doar licențe libere, cu autor și licență afișate. |
+| Unsplash | [gratuită](https://unsplash.com/developers) | Subiecte generale (economie, vreme, sănătate). |
+| Pexels | [gratuită](https://www.pexels.com/api/) | Rezervă pentru Unsplash. |
+| Copertă generată | nu | Ultima variantă; nu eșuează niciodată. |
+
+Pozele publicațiilor-sursă se folosesc **doar ca miniaturi**, cu credit („Foto: Digi24”). Poți permite
+folosirea lor ca poză principală, pentru publicațiile cu care ai un acord, din `/admin` → Surse.
+
+## Aspecte legale (pe scurt, nu este consultanță juridică)
+
+- **Median nu copiază articole.** Faptele sunt libere, formularea nu. Textele sunt originale, iar
+  verificarea automată respinge orice secvență copiată. Citatele exacte se folosesc doar pentru
+  declarațiile persoanelor.
+- **Sursele sunt listate la fiecare articol,** cu titlul original și link.
+- **Agerpres nu este inclus.** Este serviciu cu abonament; se poate adăuga doar pe bază de contract.
+- **Sunt respectate robots.txt și rezervările TDM** ale fiecărui site.
+- **Eticheta AI** apare pe fiecare articol, conform AI Act (art. 50).
+- **Recomandare:** verifică politica cu un avocat înainte de lansare. Monetizarea cu reclame
+  necesită banner de cookie-uri.
 
 ## Structură
 
-| Fișier | Rol |
+| Director | Rol |
 |---|---|
-| `lib/sources.ts` | lista surselor RSS. Adaugă un rând ca să adaugi o sursă. |
-| `lib/rss.ts` | parser RSS/Atom, extragerea imaginilor și a rezumatelor |
-| `lib/store.ts` | colectare, cache, arhivă pe disc, căutare, clasamente |
-| `lib/cluster.ts` | gruparea articolelor pe subiecte |
-| `lib/widgets.ts` | vreme, curs BNR, cutremure |
-| `app/` | paginile: `/`, `/categorie/[slug]`, `/articol/[id]`, `/live`, `/cauta`, `/salvate`, `/surse`, `/despre` |
-| `app/api/news` | JSON cu ultimele știri (`?since=`, `?category=`, `?limit=`) |
-| `app/api/refresh` | declanșează o colectare (pentru cron extern) |
+| `worker/` | Procesul permanent: colectare, text complet, AI, imagini. |
+| `lib/pipeline/` | Colectare RSS, grupare, extragere text, redactor AI, verificare, imagini. |
+| `lib/core/` | Configurare, baza de date SQLite, surse, categorii. |
+| `lib/data/` | Interogările folosite de site. |
+| `app/` | Paginile site-ului și `/admin`. |
+| `scripts/demo-network/` | Rețeaua de știri simulată (demo și teste). |
+| `scripts/eval/` | Măsurarea calității grupării și a clasificării. |
+| `test/` | Teste automate (`npm test`). |
 
-## Notă legală
-
-Median afișează doar titlul, un scurt extras și imaginea din fluxurile RSS publice, cu link
-către articolul original, care rămâne sursa canonică. Verifică termenii fiecărei publicații
-înainte de lansarea publică.
+Sursele se editează în `lib/core/sources.ts`. Fiecare sursă e un rând: nume, site, flux, categorie.

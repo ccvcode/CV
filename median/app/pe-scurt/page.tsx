@@ -3,7 +3,8 @@ import Link from "next/link";
 import { LiveUpdater } from "@/components/live-updater";
 import { Kicker, sourcesLabel } from "@/components/story";
 import { Clock } from "@/components/time";
-import { latestStories } from "@/lib/data/queries";
+import { latestStories, mostRead } from "@/lib/data/queries";
+import { CATEGORIES } from "@/lib/core/categories";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Pe scurt — toate știrile, minut cu minut", description: "Fluxul complet al știrilor Median, în ordine cronologică, actualizat la fiecare 5 minute." };
@@ -20,6 +21,7 @@ export default async function Live({ searchParams }: { searchParams: Promise<{ i
     groups[groups.length - 1].items.push(s);
   }
   const last = list[list.length - 1];
+  const read = mostRead(8);
   return (
     <main className="mx-auto max-w-[1320px] px-4 sm:px-8">
       <LiveUpdater since={Date.now()} />
@@ -61,6 +63,31 @@ export default async function Live({ searchParams }: { searchParams: Promise<{ i
           )}
           {!list.length && <p className="dek py-16 text-[20px]">Nicio știre deocamdată.</p>}
         </div>
+        <aside className="mt-8 lg:col-span-4 lg:pl-10">
+          <div className="lg:sticky lg:top-20">
+            <h2 className="kicker border-b border-rule py-2 text-ink-2">{read.byViews ? "Cele mai citite" : "Cele mai relatate azi"}</h2>
+            <ol>
+              {read.stories.map((s, i) => (
+                <li key={s.id} className="group relative flex gap-3 border-b border-rule py-3">
+                  <span className="section-head w-7 shrink-0 text-[32px] text-ink-3">{i + 1}</span>
+                  <h3 className="hl hl-sm">
+                    <Link href={s.href} className="stretched">
+                      {s.title}
+                    </Link>
+                  </h3>
+                </li>
+              ))}
+            </ol>
+            <h2 className="kicker mt-8 border-b border-rule py-2 text-ink-2">Secțiuni</h2>
+            <div className="ui mt-3 flex flex-wrap gap-x-4 gap-y-2 text-[14px] font-semibold text-ink-2">
+              {CATEGORIES.map((c) => (
+                <Link key={c.slug} href={`/categorie/${c.slug}`} className="hover:text-ink">
+                  {c.label}
+                </Link>
+              ))}
+            </div>
+          </div>
+        </aside>
       </div>
     </main>
   );

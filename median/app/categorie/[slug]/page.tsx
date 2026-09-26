@@ -68,9 +68,9 @@ export default async function CategoryPage({ params, searchParams }: { params: P
       {lead && (
         <section className="mt-8 grid gap-6 lg:grid-cols-12">
           <StoryBlock story={lead} size="xl" ratio="3/2" dek priority sizes="(max-width: 1024px) 100vw, 760px" className="lg:col-span-7" />
-          <div className="grid gap-6 sm:grid-cols-2 lg:col-span-5 lg:grid-cols-1 lg:border-l lg:border-rule lg:pl-6">
+          <div className="self-start lg:col-span-5 lg:border-l lg:border-rule lg:pl-6">
             {second.slice(0, 4).map((s) => (
-              <StoryRow key={s.id} story={s} thumb kicker={false} className="border-b border-rule pb-5 last:border-0" />
+              <StoryRow key={s.id} story={s} thumb kicker={c.slug === "international"} className="border-b border-rule py-4 first:pt-0 last:border-0" />
             ))}
           </div>
         </section>

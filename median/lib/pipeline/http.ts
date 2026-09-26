@@ -1,5 +1,34 @@
+import dns from "dns/promises";
+import net from "net";
 import { fetch as undiciFetch } from "undici";
 import { config } from "../core/config";
+
+/* ------------------------------------------------------------------ protecție SSRF */
+
+function isPrivateIp(ip: string): boolean {
+  if (net.isIPv4(ip)) {
+    const [a, b] = ip.split(".").map(Number);
+    return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
+  }
+  const v = ip.toLowerCase();
+  if (v.startsWith("::ffff:")) return isPrivateIp(v.slice(7));
+  return v === "::1" || v === "::" || v.startsWith("fc") || v.startsWith("fd") || v.startsWith("fe80");
+}
+
+/**
+ * Refuză URL-urile care duc spre rețele interne (localhost, 10.x, 169.254.x etc.), ca un flux
+ * compromis să nu poată folosi serverul pentru a accesa servicii interne. În modul demo/test
+ * (rețea simulată pe localhost) verificarea este dezactivată.
+ */
+export async function assertPublicUrl(raw: string): Promise<void> {
+  const u = new URL(raw);
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("protocol nepermis");
+  if (config.demo || process.env.MEDIAN_ALLOW_PRIVATE === "1") return;
+  const host = u.hostname.replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) throw new Error("adresă internă");
+  const addrs = net.isIP(host) ? [{ address: host }] : await dns.lookup(host, { all: true });
+  if (addrs.some((a) => isPrivateIp(a.address))) throw new Error("adresă internă");
+}
 
 export interface FetchResult {
   status: number;
@@ -29,6 +58,7 @@ export async function httpGet(url: string, opts: FetchOptions = {}): Promise<Fet
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 12_000);
   try {
+    await assertPublicUrl(url);
     const headers: Record<string, string> = {
       "user-agent": config.userAgent,
       accept: opts.accept ?? "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html;q=0.9, */*;q=0.5",
@@ -37,7 +67,7 @@ export async function httpGet(url: string, opts: FetchOptions = {}): Promise<Fet
     if (opts.etag) headers["if-none-match"] = opts.etag;
     if (opts.lastModified) headers["if-modified-since"] = opts.lastModified;
     if (opts.referer) headers.referer = opts.referer;
-    const res = await undiciFetch(url, { signal: ctrl.signal, headers, redirect: "follow" });
+    const res = await safeFetch(url, { signal: ctrl.signal, headers });
     const h = res.headers as unknown as Headers;
     if (res.status === 304) {
       ctrl.abort();
@@ -60,9 +90,10 @@ export async function httpGetBuffer(url: string, opts: FetchOptions = {}): Promi
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 15_000);
   try {
+    await assertPublicUrl(url);
     const headers: Record<string, string> = { "user-agent": config.userAgent, accept: opts.accept ?? "image/avif,image/webp,image/*;q=0.9,*/*;q=0.5" };
     if (opts.referer) headers.referer = opts.referer;
-    const res = await undiciFetch(url, { signal: ctrl.signal, headers, redirect: "follow" });
+    const res = await safeFetch(url, { signal: ctrl.signal, headers });
     if (!res.ok || !res.body) throw new HttpError(res.status, `HTTP ${res.status}`);
     const bytes = await readLimited(res.body as unknown as ReadableStream<Uint8Array>, opts.maxBytes ?? 12_000_000);
     ctrl.abort();
@@ -70,6 +101,23 @@ export async function httpGetBuffer(url: string, opts: FetchOptions = {}): Promi
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Urmează manual redirecționările (max. 5), verificând fiecare destinație. */
+async function safeFetch(url: string, init: { signal: AbortSignal; headers: Record<string, string> }) {
+  let current = url;
+  for (let i = 0; i < 6; i++) {
+    await assertPublicUrl(current);
+    const res = await undiciFetch(current, { ...init, redirect: "manual" });
+    const loc = res.headers.get("location");
+    if (res.status >= 300 && res.status < 400 && loc) {
+      res.body?.cancel().catch(() => {});
+      current = new URL(loc, current).toString();
+      continue;
+    }
+    return res;
+  }
+  throw new Error("prea multe redirecționări");
 }
 
 export class HttpError extends Error {

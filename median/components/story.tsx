@@ -120,7 +120,7 @@ export function StoryRow({ story, thumb = false, kicker = true, className }: { s
 export function StoryLink({ story }: { story: StoryCard }) {
   return (
     <li className="group relative flex gap-2 border-t border-rule py-2.5 first:border-t-0">
-      <span aria-hidden className="text-ink-3">—</span>
+      <span aria-hidden className="mt-[11px] h-px w-3 shrink-0 bg-ink-3" />
       <div>
         <h4 className="hl hl-sm">
           <Link href={story.href} className="stretched">
