@@ -74,7 +74,7 @@ export function StoryBlock({
   story,
   size = "md",
   image = true,
-  ratio = "4/3",
+  ratio = "3/2",
   dek = false,
   priority,
   sizes,
@@ -83,7 +83,7 @@ export function StoryBlock({
   story: StoryCard;
   size?: "xl" | "lg" | "md" | "sm";
   image?: boolean;
-  ratio?: "3/2" | "4/3" | "16/9" | "4/5" | "1/1" | "21/9";
+  ratio?: "3/2" | "16/9" | "1/1" | "21/9";
   dek?: boolean;
   priority?: boolean;
   sizes?: string;

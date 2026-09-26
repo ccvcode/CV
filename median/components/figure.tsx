@@ -1,7 +1,29 @@
 import type { Img } from "@/lib/core/types";
 import { cx } from "@/lib/core/utils";
 
-const RATIOS = { "3/2": "aspect-[3/2]", "4/3": "aspect-[4/3]", "16/9": "aspect-[16/9]", "21/9": "aspect-[21/9]", "4/5": "aspect-[4/5]", "1/1": "aspect-square" } as const;
+/*
+ * Rapoarte de aspect: 3/2 pentru toate blocurile cu poză, 1/1 pentru miniaturi, 16/9 doar pe pagina
+ * de articol și 21/9 pentru banda „revistă” (numai cu poze foarte late). Un rând are un singur raport.
+ */
+const RATIOS = { "3/2": "aspect-[3/2]", "16/9": "aspect-[16/9]", "21/9": "aspect-[21/9]", "1/1": "aspect-square" } as const;
+const RATIO_VALUE: Record<keyof typeof RATIOS, number> = { "3/2": 1.5, "16/9": 16 / 9, "21/9": 21 / 9, "1/1": 1 };
+
+/** Lățimea maximă (px CSS) a locului, din atributul `sizes` („(max-width: 1024px) 100vw, 760px” → 760). */
+export function slotWidth(sizes: string): number {
+  const last = sizes.split(",").pop()!.trim();
+  const px = /^(\d+)px$/.exec(last);
+  return px ? Number(px[1]) : 1320; // „100vw” sau calc(...): locul ocupă toată lățimea (containerul are max. 1320px)
+}
+
+/**
+ * Câți pixeli din sursă ajung pe lățimea locului după decupare („cover”): o poză panoramică pusă
+ * într-un loc mai îngust pierde laturile, deci are nevoie de mai mulți pixeli.
+ */
+export function usablePixels(img: Img, ratio: keyof typeof RATIOS): number {
+  const w = img.maxWidth ?? img.width;
+  const imgRatio = img.width / Math.max(1, img.height);
+  return w * Math.min(1, RATIO_VALUE[ratio] / imgRatio);
+}
 
 /**
  * Imagine editorială: raport fix, culoarea dominantă ca fundal până la încărcare, credit
@@ -24,6 +46,12 @@ export function Figure({
   caption?: string;
   className?: string;
 }) {
+  // Mod „soft”: poza e prea mică pentru loc sau are alt format (portret, emblemă). O arătăm întreagă,
+  // la mărimea ei reală, peste o copie estompată a ei, în loc s-o mărim sau s-o tăiem.
+  const slot = slotWidth(sizes);
+  const imgRatio = img.width / Math.max(1, img.height);
+  const soft =
+    ratio !== "1/1" && (usablePixels(img, ratio) < slot * 0.9 || imgRatio < RATIO_VALUE[ratio] * 0.72 || imgRatio > RATIO_VALUE[ratio] * 1.9);
   const creditNode = img.creditUrl ? (
     <a href={img.creditUrl} target="_blank" rel="noopener noreferrer nofollow" className="relative z-[2] hover:underline">
       {img.credit}
@@ -33,9 +61,15 @@ export function Figure({
   );
   return (
     <figure className={cx("m-0", className)}>
-      <div className={cx("figure", RATIOS[ratio])} style={{ backgroundColor: img.color }}>
+      <div className={cx("figure", RATIOS[ratio], soft && "figure-soft")} style={{ backgroundColor: img.color }}>
+        {soft && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img className="figure-bg" src={img.smallSrc ?? img.src} alt="" aria-hidden loading="lazy" decoding="async" referrerPolicy="no-referrer" />
+        )}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
+          data-slot={Math.round(soft ? Math.min(slot, img.maxWidth ?? img.width) : slot / Math.min(1, RATIO_VALUE[ratio] / imgRatio))}
+          style={soft ? { maxWidth: img.maxWidth ?? img.width } : undefined}
           src={img.src}
           srcSet={img.srcSet}
           sizes={sizes}

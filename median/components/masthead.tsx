@@ -7,7 +7,11 @@ import { CATEGORIES } from "@/lib/core/categories";
 import { cx } from "@/lib/core/utils";
 import { Today } from "./time";
 
-export const themeScript = `(function(){try{var t=localStorage.getItem('median-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}})()`;
+/*
+ * Tema salvată + deschiderea fiecărei pagini de sus: unele cadre (ex. previzualizări încorporate) păstrează
+ * poziția de derulare a paginii anterioare, iar articolul s-ar deschide la subsol.
+ */
+export const themeScript = `(function(){try{var t=localStorage.getItem('median-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}try{history.scrollRestoration='manual'}catch(e){}if(!location.hash){var top=function(){window.scrollTo(0,0)};top();addEventListener('DOMContentLoaded',top);addEventListener('load',top);addEventListener('pageshow',function(e){if(!e.persisted)top()})}})()`;
 
 function Wordmark({ size }: { size: "lg" | "sm" | "xs" }) {
   return (

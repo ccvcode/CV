@@ -49,6 +49,7 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
   const cat = CATEGORY_MAP[s.card.category];
   // Fiecare articol are imagine: poza aleasă automat sau, în lipsa ei, coperta generată.
   const hero = s.card.hero;
+  const wideHero = Boolean(hero && (hero.maxWidth ?? hero.width) >= 1400);
   const firstReport = [...s.sources].sort((x, y) => x.published - y.published)[0];
   // „Știrea completă” trimite la articolul din care vin titlul și extrasul afișate.
   const mainSource = s.sources.find((x) => x.lead) ?? firstReport;
@@ -127,7 +128,8 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
           </div>
         </header>
 
-        {hero && (
+        {/* Poza pe toată lățimea doar dacă are rezoluția necesară; altfel stă în coloana textului. */}
+        {hero && wideHero && (
           <div className="mt-8">
             <Figure img={hero} ratio="16/9" priority sizes="(max-width: 1320px) 100vw, 1260px" credit="caption" />
           </div>
@@ -142,6 +144,11 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
           </aside>
 
           <div className="min-w-0 lg:col-span-7">
+            {hero && !wideHero && (
+              <div className="mb-8">
+                <Figure img={hero} ratio="3/2" priority sizes="(max-width: 1024px) 100vw, 700px" credit="caption" />
+              </div>
+            )}
             {a && a.keyPoints.length > 0 && (
               <section className="mb-8 border-t-2 border-rule-strong pt-3">
                 <h2 className="kicker text-ink-2">Pe scurt</h2>
@@ -177,12 +184,22 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
               ) : (
                 <>
                   {a?.kind === "brief" && <p className="dropcap">{a.dek}</p>}
-                  {!a && s.card.dek && <p>{s.card.dek}</p>}
+                  {!a && s.card.dek && (
+                    // Fără redactor AI: un extras scurt (sub limita legală de ~120 de caractere), cu sursa.
+                    <blockquote className="border-l-[3px] border-accent pl-4">
+                      <p className="!mb-2">„{s.card.dek}”</p>
+                      <footer className="ui text-[13px] font-semibold uppercase tracking-wider text-ink-2">{mainSource?.name}</footer>
+                    </blockquote>
+                  )}
                   {mainSource && (
-                    <p className="ui text-[16px]">
-                      Știrea completă:{" "}
-                      <a href={mainSource.url} target="_blank" rel="noopener" className="font-semibold">
-                        {mainSource.name} — {mainSource.title} ↗
+                    <p className="ui mt-6">
+                      <a
+                        href={mainSource.url}
+                        target="_blank"
+                        rel="noopener"
+                        className="inline-flex items-center gap-2 bg-ink px-4 py-2.5 text-[15px] font-semibold text-on-ink no-underline hover:bg-accent"
+                      >
+                        Citește relatarea completă pe {mainSource.name} ↗
                       </a>
                     </p>
                   )}
@@ -192,7 +209,9 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
 
             {/* Surse */}
             <section className="mt-12 border-t-2 border-rule-strong pt-3" id="surse">
-              <h2 className="kicker text-ink-2">Surse · cronologia subiectului</h2>
+              <h2 className="kicker text-ink-2">
+                {a ? "Surse · cronologia subiectului" : outletCount > 1 ? `Cum au relatat ${outletCount} publicații · cronologie` : "Sursa"}
+              </h2>
               <ol className="mt-3">
                 {[...s.sources]
                   .sort((x, y) => x.published - y.published)
@@ -215,7 +234,7 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
                       </div>
                       {src.thumb && (
                         <a href={src.url} target="_blank" rel="noopener" className="w-24 shrink-0" title={src.thumb.credit}>
-                          <Figure img={src.thumb} ratio="4/3" sizes="96px" />
+                          <Figure img={src.thumb} ratio="1/1" sizes="96px" />
                           <span className="mono mt-0.5 block truncate text-[9.5px] text-ink-3">{src.thumb.credit}</span>
                         </a>
                       )}
@@ -262,6 +281,18 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
                 <p className="mt-2 text-[17px] leading-relaxed text-ink-2">{a.context}</p>
               </section>
             )}
+            {!a && s.topics.length > 0 && (
+              <section className="mb-8">
+                <h2 className="kicker text-ink-2">Persoane și locuri</h2>
+                <div className="ui mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[14px]">
+                  {s.topics.map((t) => (
+                    <Link key={t} href={`/cauta?q=${encodeURIComponent(t)}`} className="underline decoration-rule underline-offset-4 hover:decoration-ink">
+                      {t}
+                    </Link>
+                  ))}
+                </div>
+              </section>
+            )}
             {a && a.tags.length > 0 && (
               <section className="mb-8">
                 <h2 className="kicker text-ink-2">Subiecte</h2>
@@ -291,9 +322,9 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
       {s.related.length > 4 && (
         <section className="mx-auto mt-16 max-w-[1320px] px-4 sm:px-8">
           <SectionHead title={`Mai multe din ${cat?.label ?? ""}`} href={`/categorie/${s.card.category}`} size="md" />
-          <div className="grid gap-6 sm:grid-cols-2">
-            {s.related.slice(4, 6).map((r) => (
-              <StoryBlock key={r.id} story={r} ratio="16/9" size="md" sizes="(max-width: 640px) 100vw, 600px" />
+          <div className="col-rules grid gap-10 md:grid-cols-3 md:gap-12">
+            {s.related.slice(4, 7).map((r) => (
+              <StoryBlock key={r.id} story={r} ratio="3/2" size="md" sizes="(max-width: 768px) 100vw, 400px" className="col-rule" />
             ))}
           </div>
         </section>

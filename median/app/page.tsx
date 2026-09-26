@@ -21,7 +21,10 @@ export default async function Home() {
   if (!pool.length) return <EmptyState />;
 
   // Știrea principală: cel mai important subiect cu fotografie; apoi 4 secundare.
-  const lead = withPhoto(pool)[0] ?? pool[0];
+  // Știrea principală: dintre primele trei ca importanță, prima cu o poză destul de mare pentru locul
+  // mare (≥1000px); altfel prima cu poză. Pozele mici ar apărea neclare la 720px.
+  const bigPhoto = (s: StoryCard) => (listImage(s)?.maxWidth ?? 0) >= 1000;
+  const lead = pool.slice(0, 3).find(bigPhoto) ?? withPhoto(pool)[0] ?? pool[0];
   used.add(lead.id);
   const related = pool.filter((s) => s.id !== lead.id && s.category === lead.category).slice(0, 3);
   related.forEach((s) => used.add(s.id));
@@ -57,7 +60,7 @@ export default async function Home() {
           <div className="lg:col-span-7">
             {listImage(lead) && (
               <Link href={lead.href} tabIndex={-1} aria-hidden className="block">
-                <Figure img={listImage(lead)!} ratio="4/3" priority sizes="(max-width: 1024px) 100vw, 760px" credit="overlay" />
+                <Figure img={listImage(lead)!} ratio="3/2" priority sizes="(max-width: 1024px) 100vw, 720px" credit="overlay" />
               </Link>
             )}
           </div>
@@ -85,15 +88,15 @@ export default async function Home() {
 
         {/* 2. Secundare */}
         {secondary.length > 0 && (
-          <section aria-label="Alte subiecte importante" className="mt-8 grid border-t border-rule pt-6 sm:grid-cols-2 lg:grid-cols-4">
+          <section aria-label="Alte subiecte importante" className="col-rules mt-8 grid gap-x-10 gap-y-6 border-t border-rule pt-6 sm:grid-cols-2 lg:grid-cols-4">
             {secondary.map((s, i) => (
               <StoryBlock
                 key={s.id}
                 story={s}
                 size="md"
-                ratio="4/3"
-                sizes="(max-width: 640px) 100vw, 320px"
-                className={`pb-6 sm:px-4 lg:px-5 ${i % 4 === 0 ? "lg:pl-0" : "lg:border-l lg:border-rule"} ${i === 3 ? "lg:pr-0" : ""} ${i % 2 === 0 ? "sm:pl-0" : "sm:border-l sm:border-rule lg:border-l"} border-b border-rule sm:border-b-0`}
+                ratio="3/2"
+                sizes="(max-width: 640px) 100vw, 290px"
+                className="col-rule border-b border-rule pb-6 sm:border-b-0"
               />
             ))}
           </section>
@@ -152,7 +155,7 @@ export default async function Home() {
               links={REGIONS.filter((r) => r.slug !== "lume").map((r) => ({ href: `/categorie/international?regiune=${r.slug}`, label: r.label }))}
             />
             <div className="grid gap-6 lg:grid-cols-12">
-              <StoryBlock story={intl[0]} size="lg" ratio="16/9" dek priority={false} sizes="(max-width: 1024px) 100vw, 640px" className="lg:col-span-6" />
+              <StoryBlock story={intl[0]} size="lg" ratio="3/2" dek priority={false} sizes="(max-width: 1024px) 100vw, 640px" className="lg:col-span-6" />
               <div className="grid gap-6 sm:grid-cols-2 lg:col-span-6 lg:border-l lg:border-rule lg:pl-6">
                 {[intl.slice(1, 4), intl.slice(4, 7)].map((col, ci) => (
                   <div key={ci} className={ci === 1 ? "sm:border-l sm:border-rule sm:pl-6" : ""}>
@@ -194,7 +197,7 @@ export default async function Home() {
               .map(({ title, href, list }) => (
                 <div key={href}>
                   <SectionHead title={title} href={href} size="md" />
-                  <StoryBlock story={list[0]} size="lg" ratio="3/2" dek sizes="(max-width: 1024px) 100vw, 620px" />
+                  <StoryBlock story={list[0]} size="lg" ratio="3/2" dek sizes="(max-width: 1024px) 100vw, 600px" />
                   <div className="mt-5 border-t border-rule">
                     {list.slice(1, 5).map((s) => (
                       <StoryRow key={s.id} story={s} kicker={false} thumb className="border-b border-rule py-3 last:border-0" />
@@ -250,7 +253,7 @@ export default async function Home() {
           <section className="mt-16">
             <SectionHead title="Sport" href="/categorie/sport" />
             <div className="grid gap-6 lg:grid-cols-12">
-              <StoryBlock story={sport[0]} size="lg" ratio="4/5" sizes="(max-width: 1024px) 100vw, 400px" className="lg:col-span-4" />
+              <StoryBlock story={sport[0]} size="lg" ratio="3/2" sizes="(max-width: 1024px) 100vw, 410px" className="lg:col-span-4" />
               <div className="grid gap-x-6 sm:grid-cols-2 lg:col-span-8 lg:border-l lg:border-rule lg:pl-6">
                 {sport.slice(1, 7).map((s) => (
                   <StoryRow key={s.id} story={s} kicker={false} thumb className="border-b border-rule py-3" />
@@ -262,17 +265,17 @@ export default async function Home() {
 
         {/* 8. Tech | Sănătate | Auto */}
         {[tech, sanatate, auto].some((l) => l.length) && (
-          <section className="mt-16 grid gap-10 md:grid-cols-3 md:gap-6">
+          <section className="col-rules mt-16 grid gap-10 md:grid-cols-3 md:gap-12">
             {[
               { title: "Tech & Știință", href: "/categorie/tech", list: tech },
               { title: "Sănătate", href: "/categorie/sanatate", list: sanatate },
               { title: "Auto", href: "/categorie/auto", list: auto },
             ]
               .filter((x) => x.list.length)
-              .map(({ title, href, list }, i) => (
-                <div key={href} className={i > 0 ? "md:border-l md:border-rule md:pl-6" : ""}>
+              .map(({ title, href, list }) => (
+                <div key={href} className="col-rule">
                   <SectionHead title={title} href={href} size="md" />
-                  <StoryBlock story={list[0]} size="md" ratio="16/9" sizes="(max-width: 768px) 100vw, 400px" />
+                  <StoryBlock story={list[0]} size="md" ratio="3/2" sizes="(max-width: 768px) 100vw, 400px" />
                   <div className="mt-4 border-t border-rule">
                     {list.slice(1, 5).map((s) => (
                       <StoryRow key={s.id} story={s} kicker={false} className="border-b border-rule py-3 last:border-0" />

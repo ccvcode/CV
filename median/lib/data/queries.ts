@@ -1,5 +1,6 @@
 import { config } from "../core/config";
 import { db, today } from "../core/db";
+import { properNames } from "../pipeline/text";
 import type { ArticleQuote, ArticleSection, ArticleSourceRef, CategorySlug, ImageRow, Img, RegionSlug } from "../core/types";
 
 /*
@@ -57,7 +58,15 @@ export function toImg(row: ImageRow | undefined | null): Img | undefined {
   if (!widths.length) return undefined;
   const largest = widths[widths.length - 1];
   const url = (w: number) => `/media/${row.file_base}-${w}.webp`;
-  return { ...base, src: url(widths.includes(1200) ? 1200 : largest), srcSet: widths.map((w) => `${url(w)} ${w}w`).join(", ") };
+  // Variantele nu sunt niciodată mărite: cea mai mare are cel mult lățimea originalului.
+  const maxWidth = Math.min(largest, row.width ?? largest);
+  return {
+    ...base,
+    src: url(widths.includes(1200) ? 1200 : largest),
+    srcSet: widths.map((w) => `${url(w)} ${Math.min(w, maxWidth)}w`).join(", "),
+    maxWidth,
+    smallSrc: url(widths[0]),
+  };
 }
 
 function imageById(id: number | null | undefined): Img | undefined {
@@ -254,6 +263,7 @@ export interface StoryDetail {
   sources: SourceChip[];
   corrections: { text: string; created_at: number }[];
   related: StoryCard[];
+  topics: string[];
   status: string;
 }
 
@@ -326,7 +336,7 @@ export function getStory(id: string, opts: { preview?: boolean } = {}): StoryDet
   }
   if (related.length < 4) {
     const more = latestStories({ limit: 8, category: row.category }).filter((c) => c.id !== id && !related.some((r) => r.id === c.id));
-    related = [...related, ...more].slice(0, 6);
+    related = [...related, ...more].slice(0, 7);
   }
 
   return {
@@ -354,6 +364,8 @@ export function getStory(id: string, opts: { preview?: boolean } = {}): StoryDet
     sources,
     corrections,
     related,
+    // Persoane, instituții și locuri numite în titlurile surselor (legături interne către căutare).
+    topics: topicNames(items.map((i) => i.title)),
     status: st.status,
   };
 }
@@ -402,4 +414,11 @@ export function outletsList() {
        FROM sources WHERE enabled = 1 GROUP BY name ORDER BY name COLLATE NOCASE`
     )
     .all() as { name: string; site: string; tier: number; categories: string; ok: number; feeds: number; last_fetch: number | null }[];
+}
+
+/** Numele proprii (de cel puțin două cuvinte) din titlurile unui subiect, cele mai frecvente primele. */
+function topicNames(titles: string[], max = 6): string[] {
+  const count = new Map<string, number>();
+  for (const t of titles) for (const n of properNames(t)) if (n.split(" ").length >= 2) count.set(n, (count.get(n) ?? 0) + 1);
+  return [...count.entries()].sort((a, b) => b[1] - a[1]).slice(0, max).map(([n]) => n);
 }

@@ -90,4 +90,8 @@ export interface Img {
   license?: string;
   licenseUrl?: string;
   kind: ImageRow["kind"];
+  /** Lățimea reală a celei mai mari variante (poza nu se afișează mai mare de atât fără pierderi). */
+  maxWidth?: number;
+  /** Cea mai mică variantă (fundalul estompat din modul „soft”). */
+  smallSrc?: string;
 }
