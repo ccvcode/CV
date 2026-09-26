@@ -1,6 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
 import type { ImageCandidate, ParsedItem } from "../core/types";
-import { cleanText, decodeEntities, fixDiacritics, hashId, stripHtml, truncate } from "../core/utils";
+import { cleanText, cleanTitle, decodeEntities, fixDiacritics, hashId, stripHtml, truncate } from "../core/utils";
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -126,6 +126,9 @@ function parseDate(raw: string): number {
   // Zile și luni în română („Joi, 14 noiembrie 2023”) -> engleză.
   s = s.replace(/^(luni|marți|marti|miercuri|joi|vineri|sâmbătă|sambata|duminică|duminica|lun|mar|mie|joi|vin|sâm|sam|dum)\b\.?,?\s*/i, "");
   s = s.replace(/\b(ian|feb|mar|apr|mai|iun|iul|aug|sep|oct|noi|dec)[a-zăâîșţț]*\.?/gi, (m, k: string) => RO_MONTHS[k.toLowerCase()] ?? m);
+  // Format numeric românesc: „26.09.2026 11:24” / „26-09-2026”.
+  const ro = /^(\d{1,2})[./-](\d{1,2})[./-](\d{4})(?:[ T,]+(\d{1,2}):(\d{2}))?/.exec(s);
+  if (ro) s = `${ro[3]}-${ro[2].padStart(2, "0")}-${ro[1].padStart(2, "0")} ${ro[4] ?? "12"}:${ro[5] ?? "00"}:00`;
   const hasZone = /(Z|[+-]\d{2}:?\d{2}|\b(GMT|UTC|EET|EEST|[ECMP][SD]T))\s*$/i.test(s);
   const t = Date.parse(s);
   if (Number.isNaN(t)) return 0;
@@ -197,15 +200,17 @@ export function parseFeed(xml: string, site: string, now = Date.now()): ParsedIt
       .replace(/(Citește|Citeste) (mai mult|tot articolul|și).*$/i, "")
       .replace(/The post .* appeared first on .*$/i, "")
       .trim();
-    const published = parseDate(text(item["pubDate"]) || text(item["published"]) || text(item["updated"]) || text(item["dc:date"])) || now;
+    const parsedDate = parseDate(text(item["pubDate"]) || text(item["published"]) || text(item["updated"]) || text(item["dc:date"]));
+    const published = parsedDate || now;
     const author = authorOf(item);
     out.push({
       id: hashId(canonicalLink(link)),
       url: link,
-      title: fixDiacritics(title),
+      title: cleanTitle(fixDiacritics(title)),
       summary: summary.slice(0, 6000),
       author: author && author.length < 60 ? author : undefined,
       published: Math.min(published, now + 5 * 60_000),
+      dateKnown: parsedDate > 0,
       images: imageCandidates(item, html, site),
     });
   }

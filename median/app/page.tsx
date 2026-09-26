@@ -20,23 +20,27 @@ export default async function Home() {
   const pool = topStories({ limit: 30, hours: 36 });
   if (!pool.length) return <EmptyState />;
 
-  // Știrea principală: cel mai important subiect cu fotografie; apoi 4 secundare.
-  // Știrea principală: dintre primele trei ca importanță, prima cu o poză destul de mare pentru locul
-  // mare (≥1000px); altfel prima cu poză. Pozele mici ar apărea neclare la 720px.
+  // Știrea principală: un subiect relatat în ultimele 12 ore; dintre primele trei ca importanță, primul
+  // cu o poză destul de mare pentru locul mare (≥1000px), altfel primul cu poză. Apoi 4 secundare.
   const bigPhoto = (s: StoryCard) => (listImage(s)?.maxWidth ?? 0) >= 1000;
-  const lead = pool.slice(0, 3).find(bigPhoto) ?? withPhoto(pool)[0] ?? pool[0];
+  const fresh = pool.filter((s) => Date.now() - s.updated < 12 * 3600_000);
+  const lead = fresh.slice(0, 3).find(bigPhoto) ?? withPhoto(fresh)[0] ?? withPhoto(pool)[0] ?? pool[0];
   used.add(lead.id);
-  const related = pool.filter((s) => s.id !== lead.id && s.category === lead.category).slice(0, 3);
+  const related = pool.filter((s) => s.id !== lead.id && s.category === lead.category).slice(0, 2);
   related.forEach((s) => used.add(s.id));
   const secondary = [...withPhoto(pool), ...pool].filter((s, i, a) => !used.has(s.id) && a.findIndex((x) => x.id === s.id) === i).slice(0, 4);
   secondary.forEach((s) => used.add(s.id));
 
-  const latest = latestStories({ limit: 10 });
-  const read = mostRead(8);
   const breaking = breakingStories(8);
   const [rates, weather] = await Promise.all([getRates().catch(() => null), getWeather().catch(() => null)]);
 
-  const section = (category: CategorySlug, limit: number, hours = 72) => topStories({ category, limit, hours, exclude: used });
+  // Secțiunile nu repetă știrile deja afișate; prima știre a secțiunii este una cu poză (dintre primele trei).
+  const section = (category: CategorySlug, limit: number, hours = 72) => {
+    const list = topStories({ category, limit, hours, exclude: used });
+    const i = list.slice(0, 3).findIndex((s) => listImage(s));
+    if (i > 0) list.unshift(...list.splice(i, 1));
+    return list;
+  };
   const intl = section("international", 11, 48);
   const politica = section("politica", 5);
   const national = section("national", 5);
@@ -48,6 +52,11 @@ export default async function Home() {
   const cultura = section("cultura", 4, 120);
   const lifestyle = section("lifestyle", 3, 120);
   const monden = section("monden", 6, 96);
+  // „Pe scurt” și „Cele mai relatate” arată doar ce nu apare deja în altă parte a paginii.
+  const latest = latestStories({ limit: 60 }).filter((s) => !used.has(s.id)).slice(0, 8);
+  latest.forEach((s) => used.add(s.id));
+  const readAll = mostRead(30);
+  const read = { byViews: readAll.byViews, stories: readAll.stories.filter((s) => !used.has(s.id)).slice(0, 6) };
 
   return (
     <main>
@@ -90,19 +99,37 @@ export default async function Home() {
         {secondary.length > 0 && (
           <section aria-label="Alte subiecte importante" className="col-rules mt-8 grid gap-x-10 gap-y-6 border-t border-rule pt-6 sm:grid-cols-2 lg:grid-cols-4">
             {secondary.map((s, i) => (
-              <StoryBlock
-                key={s.id}
-                story={s}
-                size="md"
-                ratio="3/2"
-                sizes="(max-width: 640px) 100vw, 290px"
-                className="col-rule border-b border-rule pb-6 sm:border-b-0"
-              />
+              <div key={s.id} className="col-rule border-b border-rule pb-6 sm:border-b-0">
+                <StoryBlock story={s} size="md" ratio="3/2" sizes="(max-width: 640px) 100vw, 290px" className={i > 0 ? "hidden sm:block" : undefined} />
+                {i > 0 && <StoryRow story={s} thumb className="sm:hidden" />}
+              </div>
             ))}
           </section>
         )}
 
-        {/* 3. Flux live + cele mai citite */}
+        {/* 3. Politică + Național */}
+        {(politica.length > 0 || national.length > 0) && (
+          <section className="mt-16 grid gap-10 lg:grid-cols-2">
+            {[
+              { title: "Politică", href: "/categorie/politica", list: politica },
+              { title: "Național", href: "/categorie/national", list: national },
+            ]
+              .filter((x) => x.list.length)
+              .map(({ title, href, list }) => (
+                <div key={href}>
+                  <SectionHead title={title} href={href} size="md" />
+                  <StoryBlock story={list[0]} size="lg" ratio="3/2" dek sizes="(max-width: 1024px) 100vw, 600px" />
+                  <div className="mt-5 border-t border-rule">
+                    {list.slice(1, 5).map((s) => (
+                      <StoryRow key={s.id} story={s} kicker={false} thumb className="border-b border-rule py-3 last:border-0" />
+                    ))}
+                  </div>
+                </div>
+              ))}
+          </section>
+        )}
+
+        {/* 4. Flux live + cele mai relatate (fără repetări) */}
         <section className="mt-14 grid gap-10 lg:grid-cols-12">
           <div className="lg:col-span-8">
             <SectionHead title="Pe scurt" href="/pe-scurt" size="md" />
@@ -131,7 +158,7 @@ export default async function Home() {
             <ol>
               {read.stories.map((s, i) => (
                 <li key={s.id} className="group relative flex gap-4 border-b border-rule py-3 last:border-0">
-                  <span className="section-head w-9 shrink-0 text-[44px] text-ink-3">{i + 1}</span>
+                  <span className="section-head w-7 shrink-0 text-[30px] leading-none text-ink-3/60">{i + 1}</span>
                   <div className="min-w-0">
                     <h3 className="hl hl-sm">
                       <Link href={s.href} className="stretched">
@@ -146,7 +173,7 @@ export default async function Home() {
           </aside>
         </section>
 
-        {/* 4. Internațional */}
+        {/* 5. Internațional */}
         {intl.length > 0 && (
           <section className="mt-16">
             <SectionHead
@@ -155,25 +182,21 @@ export default async function Home() {
               links={REGIONS.filter((r) => r.slug !== "lume").map((r) => ({ href: `/categorie/international?regiune=${r.slug}`, label: r.label }))}
             />
             <div className="grid gap-6 lg:grid-cols-12">
-              <StoryBlock story={intl[0]} size="lg" ratio="3/2" dek priority={false} sizes="(max-width: 1024px) 100vw, 640px" className="lg:col-span-6" />
-              <div className="grid gap-6 sm:grid-cols-2 lg:col-span-6 lg:border-l lg:border-rule lg:pl-6">
-                {[intl.slice(1, 4), intl.slice(4, 7)].map((col, ci) => (
-                  <div key={ci} className={ci === 1 ? "sm:border-l sm:border-rule sm:pl-6" : ""}>
-                    {col.map((s) => (
-                      <StoryRow key={s.id} story={s} className="border-b border-rule py-3 first:pt-0 last:border-0" />
-                    ))}
-                  </div>
+              <StoryBlock story={intl[0]} size="lg" ratio="3/2" dek priority={false} sizes="(max-width: 1024px) 100vw, 720px" className="lg:col-span-7" />
+              <div className="lg:col-span-5 lg:border-l lg:border-rule lg:pl-6">
+                {intl.slice(1, 6).map((s) => (
+                  <StoryRow key={s.id} story={s} thumb className="border-b border-rule py-3 first:pt-0 last:border-0" />
                 ))}
               </div>
             </div>
-            {intl.length > 7 && (
+            {intl.length > 6 && (
               <div className="mt-6 grid gap-6 border-t border-rule pt-5 sm:grid-cols-2 lg:grid-cols-4">
-                {intl.slice(7, 11).map((s) => (
+                {intl.slice(6, 10).map((s) => (
                   <article key={s.id} className="group relative flex gap-3">
                     {listImage(s) && <Figure img={listImage(s)!} ratio="1/1" sizes="80px" className="w-20 shrink-0" />}
                     <div className="min-w-0">
                       <div className="kicker mb-1 text-ink-2">{s.region ? REGION_MAP[s.region]?.label : "Extern"}</div>
-                      <h3 className="hl hl-sm">
+                      <h3 className="hl hl-sm line-clamp-3">
                         <Link href={s.href} className="stretched">
                           {s.title}
                         </Link>
@@ -183,28 +206,6 @@ export default async function Home() {
                 ))}
               </div>
             )}
-          </section>
-        )}
-
-        {/* 5. Politică + Național */}
-        {(politica.length > 0 || national.length > 0) && (
-          <section className="mt-16 grid gap-10 lg:grid-cols-2">
-            {[
-              { title: "Politică", href: "/categorie/politica", list: politica },
-              { title: "Național", href: "/categorie/national", list: national },
-            ]
-              .filter((x) => x.list.length)
-              .map(({ title, href, list }) => (
-                <div key={href}>
-                  <SectionHead title={title} href={href} size="md" />
-                  <StoryBlock story={list[0]} size="lg" ratio="3/2" dek sizes="(max-width: 1024px) 100vw, 600px" />
-                  <div className="mt-5 border-t border-rule">
-                    {list.slice(1, 5).map((s) => (
-                      <StoryRow key={s.id} story={s} kicker={false} thumb className="border-b border-rule py-3 last:border-0" />
-                    ))}
-                  </div>
-                </div>
-              ))}
           </section>
         )}
 
@@ -317,10 +318,10 @@ export default async function Home() {
               <h2 className="section-head text-[24px]">Vremea</h2>
               <span className="meta">Open-Meteo · actualizat la 15 minute</span>
             </div>
-            <div className="mono mt-3 grid grid-cols-2 gap-x-6 text-[14px] sm:grid-cols-4 lg:grid-cols-7">
+            <div className="mono mt-3 grid grid-cols-2 gap-x-6 text-[13px] sm:grid-cols-3 lg:grid-cols-4">
               {weather.map((c) => (
-                <div key={c.city} className="flex justify-between border-b border-rule py-2">
-                  <span className="ui">{c.city}</span>
+                <div key={c.city} className="flex justify-between gap-2 border-b border-rule py-2">
+                  <span className="ui truncate">{c.city}</span>
                   <span>
                     {c.temp}° <span className="text-ink-3">{c.daily[0]?.min}°/{c.daily[0]?.max}°</span>
                   </span>
@@ -338,50 +339,51 @@ export default async function Home() {
 }
 
 function Magazine({ stories }: { stories: StoryCard[] }) {
-  const [main, ...rest] = [...stories.filter((s) => listImage(s)), ...stories.filter((s) => !listImage(s))];
+  // Știrea principală a benzii: cea cu poza cea mai mare (poza stă lângă titlu, nu sub el,
+  // ca să nu fie mărită sau acoperită de text pe ecranele mici).
+  const withImg = [...stories].filter((s) => listImage(s)).sort((a, b) => (listImage(b)?.maxWidth ?? 0) - (listImage(a)?.maxWidth ?? 0));
+  const main = withImg[0] ?? stories[0];
+  const rest = stories.filter((s) => s.id !== main.id);
   const img = listImage(main);
+  const label = (s: StoryCard) => (s.category === "cultura" ? "Cultură" : "Lifestyle");
   return (
-    <section className="mt-16 bg-ink text-on-ink">
+    <section className="mt-16 bg-band text-on-band">
       <div className="mx-auto max-w-[1320px] px-4 py-10 sm:px-8">
-        <div className="mb-5 flex items-end justify-between border-t-2 border-on-ink pt-3">
+        <div className="mb-6 flex flex-wrap items-end justify-between gap-x-6 gap-y-2 border-t-2 border-on-band pt-3">
           <h2 className="section-head text-[30px] sm:text-[44px]">Cultură &amp; Lifestyle</h2>
           <div className="ui flex gap-4 text-[13px] font-semibold opacity-80">
-            <Link href="/categorie/cultura">Cultură</Link>
-            <Link href="/categorie/lifestyle">Lifestyle</Link>
+            <Link href="/categorie/cultura">Cultură →</Link>
+            <Link href="/categorie/lifestyle">Lifestyle →</Link>
           </div>
         </div>
-        <article className="group relative">
-          {img ? (
-            <div className="relative">
-              <Figure img={img} ratio="21/9" sizes="100vw" credit="overlay" />
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent p-5 pt-24 sm:p-8 sm:pt-32">
-                <div className="kicker mb-2 text-white/75">{main.category === "cultura" ? "Cultură" : "Lifestyle"}</div>
-                <h3 className="hl hl-lg max-w-3xl text-white">
-                  <Link href={main.href} className="stretched pointer-events-auto">
-                    {main.title}
-                  </Link>
-                </h3>
-              </div>
+        <article className="group relative grid gap-6 lg:grid-cols-12">
+          {img && (
+            <div className="lg:col-span-7">
+              <Figure img={img} ratio="3/2" sizes="(max-width: 1024px) 100vw, 720px" credit="overlay" />
             </div>
-          ) : (
+          )}
+          <div className={img ? "lg:col-span-5 lg:self-end" : "lg:col-span-12"}>
+            <div className="kicker mb-2 opacity-70">{label(main)}</div>
             <h3 className="hl hl-lg">
               <Link href={main.href} className="stretched">
                 {main.title}
               </Link>
             </h3>
-          )}
+            {main.dek && <p className="dek mt-3 text-[17px] opacity-80">{main.dek}</p>}
+            <div className="meta mt-3 opacity-70">{sourcesLabel(main)}</div>
+          </div>
         </article>
         {rest.length > 0 && (
-          <div className="mt-6 grid gap-6 sm:grid-cols-3">
+          <div className="mt-8 grid gap-6 sm:grid-cols-3">
             {rest.slice(0, 3).map((s) => (
-              <article key={s.id} className="group relative border-t border-white/20 pt-3">
-                <div className="kicker mb-1 text-white/60">{s.category === "cultura" ? "Cultură" : "Lifestyle"}</div>
-                <h3 className="hl hl-sm">
+              <article key={s.id} className="group relative border-t border-band-rule pt-3">
+                <div className="kicker mb-1 opacity-60">{label(s)}</div>
+                <h3 className="hl hl-sm line-clamp-3">
                   <Link href={s.href} className="stretched">
                     {s.title}
                   </Link>
                 </h3>
-                <div className="meta mt-1 text-white/55">{sourcesLabel(s)}</div>
+                <div className="meta mt-1 opacity-60">{sourcesLabel(s)}</div>
               </article>
             ))}
           </div>

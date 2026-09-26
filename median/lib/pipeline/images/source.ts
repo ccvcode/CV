@@ -6,7 +6,7 @@ import { pageImageMeta } from "../fulltext";
 import { httpGet, httpGetBuffer, isAllowed } from "../http";
 import { processImage, saveImageRow, type Processed } from "./store";
 
-const REJECT_URL = /(logo|sigl[aăe]|favicon|placeholder|default[-_]?(image|img|share|og)?|avatar|sprite|pixel|1x1|spacer|blank|\/ads?\/|banner|share-default|no-image|noimage|icon)/i;
+const REJECT_URL = /(logo|sigl[aăe]|emblem|crest\b|stem[aă]-|favicon|placeholder|default[-_]?(image|img|share|og)?|avatar|sprite|pixel|1x1|spacer|blank|\/ads?\/|banner|share-default|no-image|noimage|icon)/i;
 
 export interface ScoredCandidate extends ImageCandidate {
   score: number;

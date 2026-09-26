@@ -224,3 +224,19 @@ Rezultat (1411 articole de la 60 de fluxuri, 722 de subiecte): 708 subiecte au p
 articolul-sursă, 2 au poză Wikimedia Commons, 12 au copertă generată (grafice promoționale cu text,
 logo-uri sau surse care au refuzat cererile). Verificat manual pe capturi de ecran (prima pagină,
 secțiuni, pagini de articol, mobil). Redactarea AI nu a fost testată pe date reale (lipsea cheia).
+
+**Review complet după feedback (26.09.2026, a doua trecere).** Trei agenți au analizat capturi ale tuturor
+paginilor (desktop/mobil, temă luminoasă/întunecată) și baza de date. Reparat:
+
+| Problemă | Reparație |
+|---|---|
+| Benzile „Ultima oră”, Cultură și subsolul deveneau crem în tema întunecată | Culori fixe `--band`, închise în ambele teme |
+| Aceeași știre de până la 3 ori pe prima pagină | „Pe scurt” și „Cele mai relatate” exclud ce e deja afișat; ordinea: principal, secundare, Politică/Național, flux, Internațional… |
+| „Putin” prindea „puțin”, „Ruse” pe Gabriela Ruse; „ai” = AI; „drum”, „litoral” mutau știri în Auto/Lifestyle; horoscop la R. Moldova | Reguli corectate, regiunea cu cele mai multe mențiuni, prag de încredere; accidentele mortale nu mai ajung în Auto/Lifestyle |
+| Subiecte „gigant” (147 de articole în 48h) | Un articol intră doar dacă seamănă și cu articolul central; subiectul nu depășește 36h |
+| Titluri „ULTIMA ORĂ…”, „UPDATE -”, „Life.ro - ”, MAJUSCULE, „!”, titluri duble cu „/” | `cleanTitle` la colectare; titlurile existente curățate |
+| Ore false (B1 TV: 50 de articole cu aceeași oră) | Format de dată românesc; articolele fără dată de la prima colectare nu mai apar ca „acum” |
+| Emisiuni integrale, episoade de seriale în „Pe scurt” | Filtrate la colectare |
+| Embleme/logo-uri și poze de arhivă ca poză principală | Respinse după numele real al fișierului (și cel codat de Digi24); pozele încărcate de peste 60 de zile au prioritate mică |
+| „Legate de acest subiect” fără legătură | Cer un nume propriu comun și cuvinte-cheie rare comune în titluri; altfel secțiunea nu apare |
+| Pagina de articol: extras dublat, 75 de rânduri brute, poze repetate | Bandă de acoperire, extrase de la mai multe publicații, „Citește pe…”, cronologie pe publicații (+N actualizări) |

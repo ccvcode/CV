@@ -46,3 +46,20 @@ test("numele proprii din titluri, pentru căutarea pozei fără AI", () => {
   ]);
   assert.deepEqual(e.map((x) => x.name), ["Siegfried Mureșan"]);
 });
+
+test("titlurile surselor se curăță pentru afișare", async () => {
+  const { cleanTitle } = await import("../lib/core/utils");
+  assert.equal(cleanTitle("ULTIMA ORĂ Deficit bugetar semnificativ sub cel de anul trecut"), "Deficit bugetar semnificativ sub cel de anul trecut");
+  assert.equal(cleanTitle("UPDATE - Ministerul Finanțelor: Execuția bugetară"), "Ministerul Finanțelor: Execuția bugetară");
+  assert.equal(cleanTitle("Life.ro - Când mintea pleacă la job"), "Când mintea pleacă la job");
+  assert.equal(cleanTitle("Ghinion uriaș la debutul lui Zidane! Mbappe s-a accidentat"), "Ghinion uriaș la debutul lui Zidane. Mbappe s-a accidentat");
+  assert.equal(cleanTitle("Videoclip nou de la festival"), "Videoclip nou de la festival");
+});
+
+test("regiunea și categoria nu se lasă păcălite de cuvinte românești asemănătoare", async () => {
+  const { detectRegion, classifyCategory } = await import("../lib/pipeline/text");
+  assert.equal(detectRegion("Puțin probabil ca guvernul să cadă săptămâna aceasta"), undefined);
+  assert.notEqual(detectRegion("Gabriela Ruse s-a oprit în sferturi"), "ucraina");
+  assert.equal(detectRegion("Putin spune că atacurile ucrainene au îndepărtat negocierile"), "ucraina");
+  assert.equal(classifyCategory(["Horoscop 26 septembrie: sănătatea și banii"], ["Zodia Berbec are probleme de sănătate"]), "lifestyle");
+});

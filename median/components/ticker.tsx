@@ -16,7 +16,7 @@ export function Ticker({ items }: { items: { href: string; title: string; ts: nu
   if (!items.length) return null;
   const it = items[i % items.length];
   return (
-    <div className="bg-ink text-on-ink" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+    <div className="bg-band text-on-band" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
       <div className="mx-auto flex h-9 max-w-[1320px] items-stretch px-4 sm:px-8">
         <Link href="/pe-scurt" className="kicker -ml-4 flex shrink-0 items-center bg-accent px-3 text-white sm:-ml-8 sm:px-4">
           Ultima oră

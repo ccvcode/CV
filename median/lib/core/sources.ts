@@ -87,7 +87,7 @@ const ROWS: Row[] = [
 
   // Lifestyle
   ["VIVA!", "https://www.viva.ro", "https://www.viva.ro/feed", "lifestyle", "presa"],
-  ["Click!", "https://click.ro", "https://click.ro/rss/index", "lifestyle", "presa"],
+  ["Click!", "https://click.ro", "https://click.ro/rss/index", "national", "presa"], // tabloid general: categoria după conținut
   ["Adevărul", "https://adevarul.ro", "https://adevarul.ro/rss/showbiz", "lifestyle", "presa"],
   ["Digi24", "https://www.digi24.ro", "https://www.digi24.ro/rss/magazin", "lifestyle", "tv"],
 

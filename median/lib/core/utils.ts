@@ -20,6 +20,30 @@ export function fixDiacritics(s: string): string {
   return s.replace(/ş/g, "ș").replace(/Ş/g, "Ș").replace(/ţ/g, "ț").replace(/Ţ/g, "Ț");
 }
 
+/**
+ * Titlul unei surse, curățat pentru afișare: fără etichete de tip „ULTIMA ORĂ”, „VIDEO”, „FOTO”,
+ * „BREAKING”, „(P)”; primul titlu dintr-unul dublu („A / B”, „A | B”, „A » B”); fără MAJUSCULE
+ * integrale; semnele de exclamare devin punct. Faptele din titlu rămân neschimbate.
+ */
+export function cleanTitle(raw: string): string {
+  let t = raw.replace(/\s+/g, " ").trim();
+  // Cuvinte „spațiate” de tip „F A S H I O N” → „FASHION”.
+  t = t.replace(/\b(?:[A-ZĂÂÎȘȚ] ){3,}[A-ZĂÂÎȘȚ]\b/g, (m) => m.replace(/ /g, ""));
+  // Etichete scrise cu majuscule la începutul titlului (nu și cuvintele obișnuite „Video…”, „Foto…”).
+  const label =
+    /^(?:\(P\)\s*|[\w-]+\.ro\s+[-–]\s+|(?:ULTIMA OR[ĂA]|BREAKING(?: NEWS)?|UPDATE|ACTUALIZARE|VIDEO|FOTO|GALERIE FOTO|LIVE(?: BLOG| TEXT| VIDEO)?|EXCLUSIV|DECLARA[ȚŢT]II|OFICIAL|ALERT[ĂA]|INTERVIU|DOCUMENT|SONDAJ|ANALIZ[ĂA]|OPINIE|SURSE|AST[ĂA]ZI|ATEN[ȚŢT]IE)(?=[\s\-–—:|.,/]|$)\s*(?:[-–—:|.,/]\s*)?)+/u;
+  t = t.replace(label, "").trim();
+  // Două titluri lipite: păstrăm primul, dacă e o frază completă; altfel „A » B” devine „A: B”.
+  const split = /\s(?:\/|\||»)\s/.exec(t);
+  if (split && split.index >= 35) t = t.slice(0, split.index).trim();
+  else t = t.replace(/\s»\s/g, ": ");
+  // Titluri scrise integral cu majuscule → majusculă doar la început.
+  const letters = t.replace(/[^A-Za-zĂÂÎȘŞȚŢăâîșşțţ]/g, "");
+  if (letters.length > 12 && letters === letters.toUpperCase()) t = t.charAt(0) + t.slice(1).toLowerCase();
+  t = t.replace(/!+(?=\s+\S)/g, ".").replace(/[!]+$/g, "").replace(/\s*[.,:;–-]\s*$/, "").trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
 export function stripHtml(html: string): string {
   let decoded = decodeEntities(
     html

@@ -46,12 +46,12 @@ export function Figure({
   caption?: string;
   className?: string;
 }) {
-  // Mod „soft”: poza e prea mică pentru loc sau are alt format (portret, emblemă). O arătăm întreagă,
-  // la mărimea ei reală, peste o copie estompată a ei, în loc s-o mărim sau s-o tăiem.
+  // Mod „soft”: poza e mult prea mică pentru loc (o mărire de peste 1,25x s-ar vedea neclar) sau are alt
+  // format (portret, emblemă). O arătăm întreagă, la mărimea ei reală, centrată pe un fundal neutru.
   const slot = slotWidth(sizes);
   const imgRatio = img.width / Math.max(1, img.height);
   const soft =
-    ratio !== "1/1" && (usablePixels(img, ratio) < slot * 0.9 || imgRatio < RATIO_VALUE[ratio] * 0.72 || imgRatio > RATIO_VALUE[ratio] * 1.9);
+    ratio !== "1/1" && (usablePixels(img, ratio) < slot * 0.8 || imgRatio < RATIO_VALUE[ratio] * 0.72 || imgRatio > RATIO_VALUE[ratio] * 1.9);
   const creditNode = img.creditUrl ? (
     <a href={img.creditUrl} target="_blank" rel="noopener noreferrer nofollow" className="relative z-[2] hover:underline">
       {img.credit}
@@ -61,15 +61,11 @@ export function Figure({
   );
   return (
     <figure className={cx("m-0", className)}>
-      <div className={cx("figure", RATIOS[ratio], soft && "figure-soft")} style={{ backgroundColor: img.color }}>
-        {soft && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img className="figure-bg" src={img.smallSrc ?? img.src} alt="" aria-hidden loading="lazy" decoding="async" referrerPolicy="no-referrer" />
-        )}
+      <div className={cx("figure", RATIOS[ratio], soft && "figure-soft")} style={soft ? undefined : { backgroundColor: img.color }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           data-slot={Math.round(soft ? Math.min(slot, img.maxWidth ?? img.width) : slot / Math.min(1, RATIO_VALUE[ratio] / imgRatio))}
-          style={soft ? { maxWidth: img.maxWidth ?? img.width } : undefined}
+          style={soft ? { maxWidth: `min(100%, ${img.maxWidth ?? img.width}px)` } : undefined}
           src={img.src}
           srcSet={img.srcSet}
           sizes={sizes}

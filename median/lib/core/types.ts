@@ -40,6 +40,8 @@ export interface ParsedItem {
   summary: string;
   author?: string;
   published: number;
+  /** false: fluxul nu are o dată citibilă (se folosește momentul colectării). */
+  dateKnown?: boolean;
   images: ImageCandidate[];
 }
 

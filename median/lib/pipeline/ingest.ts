@@ -6,9 +6,12 @@ import { hashId, slugify } from "../core/utils";
 import { httpGet } from "./http";
 import { enqueue } from "./jobs";
 import { parseFeed } from "./rss";
-import { byCentrality, classifyCategory, detectRegion, detectSensitive, docVector, fingerprint, fingerprintSimilarity, keywords, sameStory, type DocVector } from "./text";
+import { byCentrality, classifyCategory, detectRegion, detectSensitive, docVector, fingerprint, fingerprintSimilarity, keywords, sameStory, similarity, type DocVector } from "./text";
 
 const WINDOW_MS = 36 * 3600_000;
+
+/** Titluri care nu sunt știri (emisiuni, episoade, programe TV, conținut sponsorizat). */
+const NOT_NEWS = /(emisiunea integral|episodul (de (azi|astăzi)|\d+)|\bepisod(ul)? integral|program(ul)? tv\b|ce se difuzeaz|cine transmite la tv|^\(P\)|advertorial|articol sponsorizat)/i;
 
 interface SourceRow {
   id: string;
@@ -99,7 +102,11 @@ async function ingestSource(src: SourceRow, now: number): Promise<number> {
   }
 }
 
-export function insertItems(src: Pick<SourceRow, "id" | "category">, items: ParsedItem[], now: number): number {
+export function insertItems(src: Pick<SourceRow, "id" | "category"> & { items_total?: number | null }, items: ParsedItem[], now: number): number {
+  // Flux fără date citibile, colectat prima dată: nu știm când au apărut articolele din arhivă, deci
+  // nu le dăm ora colectării (ar părea toate „de acum”); le punem în urmă, în ordinea din flux.
+  // La colectările următoare, un articol nou chiar a apărut între timp, deci ora colectării e corectă.
+  const firstFetch = !src.items_total;
   const d = db();
   const insert = d.prepare(
     `INSERT OR IGNORE INTO items(id, source_id, url, title, summary, author, category, published_at, fetched_at, fingerprint, image_candidates)
@@ -107,7 +114,10 @@ export function insertItems(src: Pick<SourceRow, "id" | "category">, items: Pars
   );
   let added = 0;
   d.transaction(() => {
-    for (const it of items) {
+    for (const [idx, it] of items.entries()) {
+      if (it.dateKnown === false && firstFetch) it.published = now - 12 * 3600_000 - idx * 60_000;
+      // Nu sunt știri: emisiuni integrale, episoade de seriale, programe TV, reclame marcate.
+      if (NOT_NEWS.test(it.title)) continue;
       // Ignorăm articolele foarte vechi (fluxuri care republică arhiva).
       if (now - it.published > 3 * 86400_000) continue;
       const r = insert.run({
@@ -175,6 +185,26 @@ export function clusterPending(now = Date.now()): number {
   };
   for (const e of entries) addToIndex(e);
 
+  // Pentru fiecare subiect: momentul primului articol și articolul lui central (sau cel mai vechi).
+  // Un articol nou intră într-un subiect doar dacă seamănă și cu articolul central (nu doar cu un
+  // articol de la marginea grupului) și dacă subiectul nu ar depăși 36 de ore: altfel subiectele
+  // „cresc” din legătură în legătură (meci → declarații → audiențe → pariuri → alt meci).
+  const leads = new Map(
+    (d.prepare("SELECT id, lead_item_id, first_published_at FROM stories WHERE last_published_at > ?").all(now - WINDOW_MS - 12 * 3600_000) as {
+      id: string;
+      lead_item_id: string | null;
+      first_published_at: number;
+    }[]).map((r) => [r.id, r])
+  );
+  const storyLead = new Map<string, Entry>();
+  for (const e of entries) {
+    const sid = e.row.story_id!;
+    const cur = storyLead.get(sid);
+    const lead = leads.get(sid)?.lead_item_id;
+    if (!cur || e.row.id === lead || (cur.row.id !== lead && e.row.published_at < cur.row.published_at)) storyLead.set(sid, e);
+  }
+  const storyStart = (sid: string) => leads.get(sid)?.first_published_at ?? storyLead.get(sid)?.row.published_at ?? now;
+
   const touched = new Set<string>();
   const setStory = d.prepare("UPDATE items SET story_id = ?, duplicate_of = ? WHERE id = ?");
   d.transaction(() => {
@@ -187,12 +217,20 @@ export function clusterPending(now = Date.now()): number {
         if (!c.row.story_id || c.row.source_id === row.source_id) continue;
         if (Math.abs(c.row.published_at - row.published_at) > WINDOW_MS) continue;
         const r = sameStory(e.vec, c.vec, idf);
-        if (r.same && (!best || r.score > best.score)) best = { e: c, score: r.score };
+        if (!r.same || (best && r.score <= best.score)) continue;
+        const sid = c.row.story_id;
+        if (Math.abs(row.published_at - storyStart(sid)) > WINDOW_MS) continue;
+        const lead = storyLead.get(sid);
+        if (lead && lead !== c && similarity(e.vec, lead.vec, idf) < 0.15) continue;
+        best = { e: c, score: r.score };
       }
       let storyId = best?.e.row.story_id ?? null;
       let duplicateOf: string | null = null;
       if (best && fingerprintSimilarity(row.fingerprint, best.e.row.fingerprint) > 0.8) duplicateOf = best.e.row.id;
-      if (!storyId) storyId = createStory(row, now);
+      if (!storyId) {
+        storyId = createStory(row, now);
+        storyLead.set(storyId, e);
+      }
       setStory.run(storyId, duplicateOf, row.id);
       row.story_id = storyId;
       addToIndex(e);
@@ -231,12 +269,22 @@ export function refreshStory(storyId: string, now = Date.now()) {
   const sourceCount = Math.max(1, outlets.size);
   const tier1 = [...outlets.values()].filter((t) => t === 1).length;
 
-  // Categoria: cea mai specifică (non-„național”) cea mai frecventă.
+  // Categoria: cea mai specifică (non-„național”) cea mai frecventă, dar numai dacă acoperă cel puțin
+  // 40% din articole (un singur articol dintr-un flux de nișă nu mută un subiect mare în „Monden”).
   const catCount = new Map<CategorySlug, number>();
   for (const it of items) catCount.set(it.category, (catCount.get(it.category) ?? 0) + (it.category === "national" ? 0.6 : 1));
-  let category = [...catCount.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  const [topCat] = [...catCount.entries()].sort((a, b) => b[1] - a[1])[0];
+  const specific = items.filter((i) => i.category === topCat).length;
+  let category: CategorySlug = topCat !== "national" && (items.length < 3 || specific / items.length >= 0.4) ? topCat : "national";
   // Fluxuri generale („național”): încercăm o clasificare după conținut. Articolul AI o rafinează.
   if (category === "national") category = (classifyCategory(items.map((i) => i.title), items.map((i) => i.summary)) as CategorySlug | undefined) ?? "national";
+  // Un accident mortal nu e știre „Auto”, iar o crimă nu e „Lifestyle”: fluxurile de nișă publică și
+  // știri generale, care trec în „Național” (sau „Internațional”, după conținut).
+  const NICHE = ["auto", "lifestyle"];
+  if (NICHE.includes(category) && detectSensitive(items.map((i) => i.title).join(" ")).includes("deces")) {
+    const c = classifyCategory(items.map((i) => i.title), items.map((i) => i.summary)) as CategorySlug | undefined;
+    category = c && !NICHE.includes(c) ? c : "national";
+  }
   // Dacă există deja un articol publicat, categoria aleasă de redactor are prioritate.
   if (story.article_id) {
     const a = d.prepare("SELECT s2.category FROM stories s2 WHERE s2.id = ?").get(storyId) as { category: CategorySlug };

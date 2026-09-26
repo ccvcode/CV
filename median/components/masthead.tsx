@@ -11,7 +11,7 @@ import { Today } from "./time";
  * Tema salvată + deschiderea fiecărei pagini de sus: unele cadre (ex. previzualizări încorporate) păstrează
  * poziția de derulare a paginii anterioare, iar articolul s-ar deschide la subsol.
  */
-export const themeScript = `(function(){try{var t=localStorage.getItem('median-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}try{history.scrollRestoration='manual'}catch(e){}if(!location.hash){var top=function(){window.scrollTo(0,0)};top();addEventListener('DOMContentLoaded',top);addEventListener('load',top);addEventListener('pageshow',function(e){if(!e.persisted)top()})}})()`;
+export const themeScript = `(function(){try{var t=localStorage.getItem('median-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}try{history.scrollRestoration='manual'}catch(e){}if(!location.hash){var top=function(){window.scrollTo(0,0);try{var f=document.body&&document.body.firstElementChild;if(f)f.scrollIntoView({block:'start'})}catch(e){}};top();addEventListener('DOMContentLoaded',function(){if(window.scrollY<5||!window.__medianScrolled)top()});addEventListener('scroll',function(){window.__medianScrolled=1},{once:true,passive:true})}})()`;
 
 function Wordmark({ size }: { size: "lg" | "sm" | "xs" }) {
   return (

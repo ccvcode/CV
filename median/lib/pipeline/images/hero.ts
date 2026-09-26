@@ -72,7 +72,7 @@ export async function chooseHero(storyId: string): Promise<number | null> {
   // Poza reală a articolului, chiar mai mică, e mai relevantă decât un portret generic din Wikidata.
   if (config.images.sourceImages === "hero" || items.some((i) => i.hero_images === 1)) {
     const topic = new Set(items.slice(0, 5).flatMap((i) => keywords(i.title)).filter((k) => !/^\d+$/.test(k)));
-    const found: { imgId: number; big: boolean; named: boolean; rank: number }[] = [];
+    const found: { imgId: number; big: boolean; named: boolean; rank: number; archive: boolean }[] = [];
     for (const [rank, it] of items.slice(0, 8).entries()) {
       if (config.images.sourceImages !== "hero" && it.hero_images !== 1) continue;
       const imgId = it.thumb_image_id ?? (await makeSourceThumb(it.id).catch(() => null));
@@ -80,14 +80,21 @@ export async function chooseHero(storyId: string): Promise<number | null> {
       const img = d.prepare("SELECT width, widths, status, original_url FROM images WHERE id = ?").get(imgId) as { width: number; widths: string; status: string; original_url: string };
       const widths = JSON.parse(img.widths) as number[];
       if (img.status !== "ok") continue;
+      // Logo-uri și embleme ascunse în numele fișierului codat de CDN (ex. „manchester-city-emblema.png”).
+      if (/(logo|sigl[aăe]|emblem|crest\b|stem[aă]\b)/i.test(imageName(img.original_url))) continue;
       const big = img.width >= 1000 && widths.includes(1200);
       // Poze reale mai mici (≥600px) doar dacă au o variantă la mărimea lor (nu mărite de la 400px).
       if (!big && !(img.width >= 600 && Math.max(...widths) >= 600)) continue;
       const named = keywords(imageName(img.original_url)).some((k) => topic.has(k));
-      found.push({ imgId, big, named, rank });
-      if (big && named) break;
+      const archive = isArchivePhoto(img.original_url);
+      found.push({ imgId, big, named, rank, archive });
+      if (big && named && !archive) break;
     }
-    found.sort((a, b) => Number(b.big) - Number(a.big) || Number(b.named) - Number(a.named) || a.rank - b.rank);
+    // Ordinea: poză mare, apoi poză recentă (nu din arhiva publicației), apoi numele fișierului
+    // potrivit cu subiectul, apoi articolul cel mai central.
+    found.sort(
+      (a, b) => Number(b.big) - Number(a.big) || Number(a.archive) - Number(b.archive) || Number(b.named) - Number(a.named) || a.rank - b.rank
+    );
     if (found.length) return setHero(storyId, found[0].imgId);
   }
 
@@ -199,6 +206,17 @@ export function guessEntities(titles: string[]): { name: string; type: string }[
 }
 
 /**
+ * Poză „de arhivă”: încărcată de publicație cu peste 60 de zile în urmă (calea WordPress /2025/04/...
+ * sau numele codat al Digi24). De obicei e o poză generică a unei persoane, nu a evenimentului.
+ */
+export function isArchivePhoto(url: string, now = Date.now()): boolean {
+  const m = /\/(20\d\d)\/(0[1-9]|1[0-2])\//.exec(gatewaySource(url) ?? url);
+  if (!m) return false;
+  const uploaded = Date.UTC(Number(m[1]), Number(m[2]) - 1, 28);
+  return now - uploaded > 60 * 86400_000;
+}
+
+/**
  * Numele fișierului unei imagini, ca text („fragment drona agigea 5”). Unele CDN-uri (ex. Digi24)
  * codează adresa originală în base64 în cale; o decodăm ca să ajungem la numele real.
  */
@@ -210,20 +228,24 @@ export function imageName(url: string): string {
     return "";
   }
   let name = decodeURIComponent(u.pathname.split("/").pop() ?? "");
-  const gw = /\/gateway\/g\/(.+?)(?:\.\w+)?$/.exec(u.pathname);
-  if (gw) {
-    try {
-      const decoded = decodeURIComponent(Buffer.from(gw[1].replace(/\//g, ""), "base64").toString("latin1"));
-      const src = /fileSource=([^&]+)/.exec(decoded)?.[1];
-      if (src) name = src.split("/").pop() ?? name;
-    } catch {
-      /* rămâne numele din cale */
-    }
-  }
+  const src = gatewaySource(url);
+  if (src) name = src.split("/").pop() ?? name;
   return name
     .replace(/\.\w{2,4}$/, "")
     .replace(/\b(\d+x\d+|scaled|thumb|image|img|foto|photo|inquam|photos|profimedia|shutterstock|getty|gettyimages|agerpres|hepta|mediafax|captura|screenshot)\b/gi, " ")
     .replace(/[-_.]+/g, " ");
+}
+
+/** Adresa originală codată în base64 de CDN-ul Digi24 („/gateway/g/<base64>.jpg”), dacă e cazul. */
+function gatewaySource(url: string): string | undefined {
+  const gw = /\/gateway\/g\/(.+?)(?:\.\w+)?(?:\?|$)/.exec(url);
+  if (!gw) return undefined;
+  try {
+    const decoded = decodeURIComponent(Buffer.from(gw[1].replace(/\//g, ""), "base64").toString("latin1"));
+    return /fileSource=([^&]+)/.exec(decoded)?.[1];
+  } catch {
+    return undefined;
+  }
 }
 
 function rank(type: string): number {

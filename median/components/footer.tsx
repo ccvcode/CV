@@ -3,7 +3,7 @@ import { CATEGORIES } from "@/lib/core/categories";
 
 export function Footer({ outlets, ai = true }: { outlets: string[]; ai?: boolean }) {
   return (
-    <footer className="mt-24 overflow-hidden bg-ink text-on-ink">
+    <footer className="mt-24 overflow-hidden bg-band text-on-band">
       <div className="mx-auto max-w-[1320px] px-4 pt-14 sm:px-8">
         <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
           <div>

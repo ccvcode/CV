@@ -17,7 +17,7 @@ export function Kicker({ story, className, showRegion = true }: { story: StoryCa
   return (
     <div className={cx("kicker flex items-center gap-2", className)}>
       {story.breaking && <span className="text-accent">Ultima oră</span>}
-      <span className="text-ink-2">{region ?? cat?.short}</span>
+      <span className="text-ink-2">{region ?? (story.category === "international" ? "Lume" : cat?.short)}</span>
     </div>
   );
 }
@@ -54,7 +54,7 @@ export function Meta({ story, className, reading }: { story: StoryCard; classNam
 
 function Headline({ story, size, className, as: Tag = "h3" }: { story: StoryCard; size: "xl" | "lg" | "md" | "sm"; className?: string; as?: "h2" | "h3" }) {
   return (
-    <Tag className={cx("hl", size === "xl" ? leadClass(story.title) : `hl-${size}`, className)}>
+    <Tag className={cx("hl", size === "xl" ? leadClass(story.title) : `hl-${size}`, size === "md" && "line-clamp-5", size === "sm" && "line-clamp-4", className)}>
       <Link href={story.href} className="stretched">
         {story.title}
       </Link>
@@ -64,9 +64,9 @@ function Headline({ story, size, className, as: Tag = "h3" }: { story: StoryCard
 
 /** Mărimea titlului principal după lungime (titlurile lungi nu umplu tot ecranul). */
 export function leadClass(title: string): string {
-  if (title.length <= 60) return "hl-xl";
-  if (title.length <= 95) return "hl-xl !text-[clamp(30px,3.3vw,46px)]";
-  return "hl-lg !text-[clamp(28px,2.8vw,38px)]";
+  if (title.length <= 55) return "hl-xl";
+  if (title.length <= 75) return "hl-xl !text-[clamp(30px,3.1vw,44px)]";
+  return "hl-lg !text-[clamp(26px,2.5vw,34px)]";
 }
 
 /** Blocul standard: imagine sus (opțional), supratitlu, titlu, sub-titlu, meta. */

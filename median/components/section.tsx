@@ -15,7 +15,7 @@ export function SectionHead({ title, href, links, className, size = "lg" }: { ti
           )}
         </h2>
         {links && links.length > 0 && (
-          <nav className="ui no-scrollbar flex max-w-full gap-x-4 overflow-x-auto whitespace-nowrap pb-1 text-[13px] font-semibold text-ink-2">
+          <nav className="ui no-scrollbar fade-right flex max-w-full gap-x-4 overflow-x-auto whitespace-nowrap pb-1 text-[13px] font-semibold text-ink-2">
             {links.map((l, i) => (
               <Link key={l.href} href={l.href} className="hover:text-ink">
                 {i > 0 && <span aria-hidden className="mr-4 text-ink-3">·</span>}

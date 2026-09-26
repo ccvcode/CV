@@ -102,7 +102,7 @@ export function docVector(title: string, lead: string): DocVector {
  * (ex. „o insectă din SUA, citată de AFP” ≠ „Iranul trimite SUA o propunere, relatează AFP”).
  * Forma e cea din `entities()`: fiecare cuvânt fără diacritice, tăiat la 6 litere.
  */
-const GENERIC_ENTITIES = new Set(
+export const GENERIC_ENTITIES = new Set(
   (
     "sua|statel unite|americ|romani|europa|europe|uniune europe|ue|nato|onu|rusia|rusiei|rusa|federa rusa|ucrain|china|chinei|" +
     "german|franta|frante|italia|italie|spania|spanie|marea britan|regatu unit|ungari|bulgar|poloni|turcia|turcie|israel|" +
@@ -137,7 +137,8 @@ export function byCentrality<T extends { title: string; summary: string; tier: n
   const score = items.map((_, i) => {
     let sum = 0;
     for (let j = 0; j < items.length; j++) if (j !== i) sum += similarity(vecs[i], vecs[j], one);
-    return sum / (items.length - 1);
+    // Titlurile foarte lungi (un rezumat întreg pus în titlu) nu sunt bune ca titlu al subiectului.
+    return sum / (items.length - 1) - Math.max(0, items[i].title.length - 110) * 0.002;
   });
   return items
     .map((it, i) => ({ it, s: score[i] }))
@@ -234,18 +235,24 @@ export function fingerprintSimilarity(a: string, b: string): number {
 /* ------------------------------------------------------------------ regiuni (Internațional) */
 
 const REGIONS: [RegionSlug, RegExp][] = [
-  ["ucraina", /\b(ucrain|kiev|kyiv|zelenski|zelensky|rusia|rusiei|rusesc|ruse\b|rusi\b|putin\b|kremlin|moscov|donbas|harkov|odesa|crimeea)/],
-  ["moldova", /\b(moldov|chisinau|maia sandu|presedint[ae]i? sandu|transnistr|gagauz)/],
-  ["orientul-mijlociu", /\b(israel|gaza|hamas|hezbollah|liban|iran|teheran|siria|irak|yemen|houthi|saudit|netanyahu|cisiordani|palestin)/],
-  ["sua", /\b(sua\b|statele unite|washington|trump|casa alba|pentagon|congresul american|congresul sua|senatul american|new york|california|biden|vance|americani)/],
-  ["asia", /\b(china|beijing|taiwan|japoni|tokyo|coreea|phenian|seul|india\b|pakistan|afganistan|indonezi|vietnam|filipin)/],
-  ["europa", /\b(ue\b|uniunea europeana|bruxelles|comisia europeana|parlamentul european|germani|berlin|franta|paris|macron|merz|itali|spani|polon|ungari|viktor orban|bulgari|serbi|grecia|austri|olanda|belgia|marea britanie|londra|europa\b|zona euro)/],
+  // Atenție la cuvintele românești care seamănă: „puțin” → „putin”, „Ruse” (Gabriela Ruse, Giurgiu–Ruse).
+  ["ucraina", /\b(ucrain|kiev|kyiv|zelenski|zelensky|rusia|rusiei|rusesc|(armat|forte|trupe|drone|rachete|atacuri)\w* ruse\b|vladimir putin|lui putin|putin (a|i|spune|sustine|anunta|afirma|avertizeaza)\b|kremlin|moscov|donbas|harkov|odesa|crimeea)/g],
+  ["moldova", /\b(moldov|chisinau|ungheni|maia sandu|presedint[ae]i? sandu|transnistr|gagauz)/g],
+  ["orientul-mijlociu", /\b(israel|gaza|hamas|hezbollah|liban|iran|teheran|siria|irak|yemen|houthi|saudit|netanyahu|cisiordani|palestin)/g],
+  ["sua", /\b(sua\b|statele unite|washington|trump|casa alba|pentagon|congresul american|congresul sua|senatul american|new york|california|biden|vance|americani)/g],
+  ["asia", /\b(china|beijing|taiwan|japoni|tokyo|coreea|phenian|seul|india\b|pakistan|afganistan|indonezi|vietnam|filipin)/g],
+  ["europa", /\b(ue\b|uniunea europeana|bruxelles|comisia europeana|parlamentul european|germani|berlin|franta|paris|macron|merz|itali|spani|polon|ungari|viktor orban|bulgari|serbi|grecia|austri|olanda|belgia|marea britanie|londra|europa\b|zona euro)/g],
 ];
 
+/** Regiunea cu cele mai multe mențiuni distincte (nu prima găsită: o singură mențiune a Rusiei nu face o știre „Ucraina”). */
 export function detectRegion(text: string): RegionSlug | undefined {
   const t = fold(text);
-  for (const [slug, re] of REGIONS) if (re.test(t)) return slug;
-  return undefined;
+  let best: { slug: RegionSlug; n: number } | undefined;
+  for (const [slug, re] of REGIONS) {
+    const n = new Set(t.match(re) ?? []).size;
+    if (n && (!best || n > best.n)) best = { slug, n };
+  }
+  return best?.slug;
 }
 
 /* ------------------------------------------------------------------ subiecte sensibile */
@@ -270,11 +277,12 @@ const CATEGORY_RULES: [CategorySlugLite, RegExp][] = [
   ["politica", /\b(guvern|parlament|senat|deputat|ministr|premier|presedint|partid|psd|pnl|usr|aur|udmr|alegeri|coalit|motiun|cotroceni|consiliul local|primar)/g],
   ["economie", /\b(inflati|bnr|curs(ul)? valutar|euro\b|lei\b|buget|deficit|tax|impozit|salari|pret|scump|investit|fabric|compani|bursa|bvb|pib|export|anaf|tva|dobanz|credit|banc)/g],
   ["sport", /\b(meci|fotbal|gol|campionat|superliga|nationala de|tenis|turneu|handbal|jucat|antrenor|olimpic|medali|formula 1|echipa|stadion|victorie|calificat)/g],
-  ["tech", /\b(inteligenta artificiala|\bai\b|software|aplicati|smartphone|telefon|cibernetic|ransomware|hacker|start-?up|satelit|spatial|nasa|cercetator|5g|internet|date personale|algoritm|cip)/g],
-  ["sanatate", /\b(spital|medic|pacient|boal|vaccin|grip|cancer|sanatat|tratament|urgent|chirurg|medicament|epidemi|virus)/g],
-  ["auto", /\b(masin|autoturism|autovehicul|\bauto\b|autostrad|drum|trafic|sofer|rovinieta|permis|dacia|inmatricul|electrice|benzin|motorin)/g],
+  // „AI” se numără separat, cu majuscule („ai” e și verbul „a avea”); „cip” ar prinde „Ciprian”.
+  ["tech", /\b(inteligenta artificiala|openai|chatgpt|software|aplicati|smartphone|cibernetic|ransomware|hacker|satelit|spatial|nasa|cercetator|5g|internet|date personale|algoritm|cipuri|cipul|semiconductor)/g],
+  ["sanatate", /\b(spital|medic|pacient|boal|vaccin|grip|cancer|sanatat|tratament|urgent|chirurg|medicament|epidemi|virus|alergi|raceal|simptom|nutritionist|diet[aei]\b|colesterol|diabet|tensiun)/g],
+  ["auto", /\b(masin|autoturism|autovehicul|\bauto\b|rovinieta|permis(ul)? (auto|de conducere)|dacia|inmatricul|model(ul)? (electric|nou)|hibrid|motor(ul)?\b|recheama in service|salon auto)/g],
   ["cultura", /\b(film|festival|teatru|carte|muzeu|expozit|concert|opera|scriitor|cinema|tiff|spectacol|premier[aă] (filmului|spectacolului)|literatur)/g],
-  ["lifestyle", /\b(vacant|calator|turism|turist|retet|gastronom|moda|gradin|munte|litoral|revelion|hotel|pensiun|sejur)/g],
+  ["lifestyle", /\b(vacant|turism|turist|retet|gastronom|moda\b|gradin|revelion|hotel|pensiun|sejur|horoscop|zodi|destinati|mic dejun|desert|prajitur|gatit|bucatari)/g],
   ["monden", /\b(vedet|actrit|actor|cantaret|nunt|divort|showbiz|gala|influencer|celebr|logodn)/g],
 ];
 type CategorySlugLite = "politica" | "economie" | "sport" | "tech" | "sanatate" | "auto" | "cultura" | "lifestyle" | "monden";
@@ -288,15 +296,27 @@ export function classifyCategory(titles: string[], summaries: string[]): string 
   const t = fold(titles.join(" "));
   const s = fold(summaries.join(" ").slice(0, 3000));
   // Știre externă: majoritatea titlurilor vorbesc despre alt stat/regiune și nu despre politica internă.
-  const DOMESTIC = /\b(guvernul|guvern\b|parlament|senat\b|camera deputatilor|psd|pnl|usr|aur|udmr|primari|consiliul judetean|anaf)/;
+  const DOMESTIC = /\b(guvernul|guvern\b|parlament|senat\b|camera deputatilor|psd|pnl|usr|aur|udmr|primari|consiliul judetean|anaf|judetul|bucurest|isu\b|politia romana|horoscop|zodi)/;
   const withRegion = titles.filter((x) => detectRegion(x) && !DOMESTIC.test(fold(x))).length;
   if (withRegion > 0 && withRegion * 2 >= titles.length) return "international";
-  let best: { cat: string; score: number } | undefined;
+  // Horoscopul are termeni de sănătate, bani și dragoste: e mereu „Lifestyle”.
+  if (/\b(horoscop|zodia|zodii|zodiac)/.test(t)) return "lifestyle";
+  const aiMentions = (x: string) => (/\bAI\b/.test(x) ? 1 : 0);
+  const scores: { cat: string; score: number; stems: number }[] = [];
   for (const [cat, re] of CATEGORY_RULES) {
-    const inTitle = new Set(t.match(re) ?? []).size;
-    const inBody = new Set(s.match(re) ?? []).size;
-    const score = inTitle * 2 + inBody;
-    if (score >= 3 && (!best || score > best.score)) best = { cat, score };
+    const tm = new Set(t.match(re) ?? []);
+    const sm = new Set(s.match(re) ?? []);
+    let score = tm.size * 2 + sm.size;
+    let stems = new Set([...tm, ...sm]).size;
+    if (cat === "tech") {
+      score += aiMentions(titles.join(" ")) * 2 + aiMentions(summaries.join(" "));
+      stems += aiMentions(titles.join(" ") + " " + summaries.join(" "));
+    }
+    scores.push({ cat, score, stems });
   }
-  return best?.cat;
+  scores.sort((a, b) => b.score - a.score);
+  const [best, second] = scores;
+  // Cel puțin două cuvinte-cheie diferite, scor ≥3 și un avans față de a doua categorie.
+  if (best && best.score >= 3 && best.stems >= 2 && best.score > (second?.score ?? 0)) return best.cat;
+  return undefined;
 }

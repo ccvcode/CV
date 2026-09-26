@@ -11,7 +11,7 @@ import { config } from "@/lib/core/config";
 import { CATEGORY_MAP } from "@/lib/core/categories";
 import type { ArticleQuote } from "@/lib/core/types";
 import { formatDate, formatLongDate, formatTime } from "@/lib/core/utils";
-import { getStory } from "@/lib/data/queries";
+import { getStory, type SourceChip } from "@/lib/data/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -49,11 +49,16 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
   const cat = CATEGORY_MAP[s.card.category];
   // Fiecare articol are imagine: poza aleasă automat sau, în lipsa ei, coperta generată.
   const hero = s.card.hero;
-  const wideHero = Boolean(hero && (hero.maxWidth ?? hero.width) >= 1400);
+  // Pe toată lățimea doar pozele mari și orizontale; portretele stau în coloana textului.
+  const wideHero = Boolean(hero && (hero.maxWidth ?? hero.width) >= 1400 && hero.width / Math.max(1, hero.height) >= 1.3);
   const firstReport = [...s.sources].sort((x, y) => x.published - y.published)[0];
   // „Știrea completă” trimite la articolul din care vin titlul și extrasul afișate.
   const mainSource = s.sources.find((x) => x.lead) ?? firstReport;
   const outletCount = new Set(s.sources.map((x) => x.name)).size;
+  const lastReport = [...s.sources].sort((x, y) => y.published - x.published)[0];
+  // Extrase din alte publicații (câte unul, fiecare sub limita legală), cu titluri diferite între ele.
+  const angles = pickAngles(s.sources, mainSource?.url);
+  const readOn = [...new Map(s.sources.map((x) => [x.name, x])).values()].slice(0, 6);
   const outlets = [...new Set(s.sources.map((x) => x.name))];
   const updated = a && a.updated - a.published > 5 * 60_000 ? a.updated : undefined;
   const pull: ArticleQuote | undefined = a?.quotes.find((q) => q.text.length > 40 && q.text.length < 260);
@@ -83,7 +88,7 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
 
       <article className="mx-auto max-w-[1320px] px-4 sm:px-8">
         <header className="grid pt-8 sm:pt-12 lg:grid-cols-12">
-          <div className="lg:col-span-9">
+          <div className="lg:col-span-10 lg:col-start-2">
             <div className="flex items-center gap-3">
               <Link href={`/categorie/${s.card.category}`} className="kicker text-ink-2 hover:text-ink">
                 {cat?.label}
@@ -91,7 +96,8 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
               {s.card.breaking && <span className="kicker text-accent">Ultima oră</span>}
             </div>
             <h1 className={`hl mt-3 ${(a?.headline ?? s.card.title).length > 90 ? "hl-xl !text-[clamp(30px,3.4vw,46px)]" : "hl-xl sm:!text-[56px]"}`}>{a?.headline ?? s.card.title}</h1>
-            {(a?.dek ?? s.card.dek) && <p className="dek mt-5 max-w-3xl text-[20px] sm:text-[22px]">{a?.dek ?? s.card.dek}</p>}
+            {/* Fără articol AI, extrasul sursei apare o singură dată, citat și atribuit, în corpul paginii. */}
+            {a?.dek && <p className="dek mt-5 max-w-3xl text-[20px] sm:text-[22px]">{a.dek}</p>}
 
             {/* Transparență: eticheta AI vizibilă de la prima vedere (AI Act, art. 50) */}
             {a && (
@@ -124,6 +130,17 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
                   <span>{Math.max(1, Math.round(a.wordCount / 220))} min citire</span>
                 </>
               )}
+            </div>
+            {/* Acoperirea subiectului: date proprii Median (cine a relatat și când). */}
+            {!a && outletCount > 1 && firstReport && lastReport && (
+              <p className="ui mt-3 text-[13px] text-ink-2">
+                <b className="text-ink">{outletCount} publicații</b> au relatat · primul raport: {firstReport.name},{" "}
+                <span suppressHydrationWarning>{formatDate(firstReport.published)}</span>{" "}
+                · ultima relatare <TimeAgo ts={lastReport.published} />
+              </p>
+            )}
+            <div className="mt-4 lg:hidden">
+              <ArticleTools item={{ id: s.card.id, href: canonical, title: a?.headline ?? s.card.title, ts: Date.now() }} />
             </div>
           </div>
         </header>
@@ -184,24 +201,45 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
               ) : (
                 <>
                   {a?.kind === "brief" && <p className="dropcap">{a.dek}</p>}
-                  {!a && s.card.dek && (
+                  {!a && (mainSource?.excerpt ?? s.card.dek) && (
                     // Fără redactor AI: un extras scurt (sub limita legală de ~120 de caractere), cu sursa.
                     <blockquote className="border-l-[3px] border-accent pl-4">
-                      <p className="!mb-2">„{s.card.dek}”</p>
+                      <p className="!mb-2">„{mainSource?.excerpt ?? s.card.dek}”</p>
                       <footer className="ui text-[13px] font-semibold uppercase tracking-wider text-ink-2">{mainSource?.name}</footer>
                     </blockquote>
                   )}
+                  {!a && angles.length > 0 && (
+                    <section className="mt-8">
+                      <h2 className="kicker !mt-0 text-ink-2">Ce mai spun publicațiile</h2>
+                      <ul className="ui mt-3 space-y-4 text-[16px] leading-snug">
+                        {angles.map((x) => (
+                          <li key={x.url} className="border-t border-rule pt-3">
+                            <a href={x.url} target="_blank" rel="noopener" className="font-semibold text-ink no-underline hover:underline">
+                              {x.name}: {x.title} ↗
+                            </a>
+                            <p className="!mb-0 mt-1 text-ink-2">„{x.excerpt}”</p>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
                   {mainSource && (
-                    <p className="ui mt-6">
-                      <a
-                        href={mainSource.url}
-                        target="_blank"
-                        rel="noopener"
-                        className="inline-flex items-center gap-2 bg-ink px-4 py-2.5 text-[15px] font-semibold text-on-ink no-underline hover:bg-accent"
-                      >
-                        Citește relatarea completă pe {mainSource.name} ↗
-                      </a>
-                    </p>
+                    <div className="ui mt-8 border-t-2 border-rule-strong pt-3">
+                      <div className="kicker text-ink-2">Citește relatarea completă</div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(a ? [mainSource] : readOn).map((x) => (
+                          <a
+                            key={x.name}
+                            href={x.url}
+                            target="_blank"
+                            rel="noopener"
+                            className="inline-flex items-center border border-rule-strong px-3 py-1.5 text-[14px] font-semibold text-ink no-underline hover:bg-ink hover:text-on-ink"
+                          >
+                            {x.name} ↗
+                          </a>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </>
               )}
@@ -212,39 +250,11 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
               <h2 className="kicker text-ink-2">
                 {a ? "Surse · cronologia subiectului" : outletCount > 1 ? `Cum au relatat ${outletCount} publicații · cronologie` : "Sursa"}
               </h2>
-              <ol className="mt-3">
-                {[...s.sources]
-                  .sort((x, y) => x.published - y.published)
-                  .map((src, i) => (
-                    <li key={src.url} className="flex gap-4 border-b border-rule py-3 last:border-0">
-                      <span className="mono w-12 shrink-0 pt-0.5 text-[12px] text-ink-3" suppressHydrationWarning>
-                        {formatTime(src.published)}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="ui text-[14px] font-semibold">
-                          {src.name}
-                          {i === 0 && s.sources.length > 1 && <span className="kicker ml-2 text-accent">Primul raport</span>}
-                        </div>
-                        <a href={src.url} target="_blank" rel="noopener" className="dek mt-0.5 block text-[16px] hover:underline">
-                          „{src.title}” <span className="ui not-italic text-ink-3">↗</span>
-                        </a>
-                        <div className="meta mt-0.5" suppressHydrationWarning>
-                          {formatDate(src.published)}
-                        </div>
-                      </div>
-                      {src.thumb && (
-                        <a href={src.url} target="_blank" rel="noopener" className="w-24 shrink-0" title={src.thumb.credit}>
-                          <Figure img={src.thumb} ratio="1/1" sizes="96px" />
-                          <span className="mono mt-0.5 block truncate text-[9.5px] text-ink-3">{src.thumb.credit}</span>
-                        </a>
-                      )}
-                    </li>
-                  ))}
-              </ol>
-              <p className="ui mt-4 bg-surface p-4 text-[13px] leading-relaxed text-ink-2">
+              <Timeline sources={s.sources} heroKey={hero?.smallSrc} />
+              <p className="ui mt-6 text-[12px] leading-relaxed text-ink-3">
                 {a
-                  ? `Acest articol a fost redactat cu ajutorul inteligenței artificiale pe baza informațiilor publicate de ${outlets.join(", ")}. Faptele aparțin surselor citate; formularea este a redacției Median.`
-                  : "Median semnalează această știre și trimite la publicațiile care au relatat-o."}{" "}
+                  ? `Articol redactat cu ajutorul inteligenței artificiale pe baza informațiilor publicate de ${outlets.join(", ")}. Faptele aparțin surselor citate; formularea este a redacției Median.`
+                  : "Median grupează relatările publicațiilor și trimite la textele lor complete."}{" "}
                 Ai observat o eroare?{" "}
                 <Link href={`/corecturi?stire=${s.card.id}`} className="font-semibold underline underline-offset-2">
                   Semnalează o corectură
@@ -262,9 +272,6 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
               )}
             </section>
 
-            <div className="mt-8 lg:hidden">
-              <ArticleTools item={{ id: s.card.id, href: canonical, title: a?.headline ?? s.card.title, ts: Date.now() }} />
-            </div>
           </div>
 
           {/* Marginea: context și „De ce contează” */}
@@ -309,7 +316,7 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
               <section className="lg:sticky lg:top-20">
                 <h2 className="kicker text-ink-2">Legate de acest subiect</h2>
                 <div className="mt-2">
-                  {s.related.slice(0, 4).map((r) => (
+                  {s.related.map((r) => (
                     <StoryRow key={r.id} story={r} kicker={false} className="border-b border-rule py-3 last:border-0" />
                   ))}
                 </div>
@@ -319,11 +326,11 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
         </div>
       </article>
 
-      {s.related.length > 4 && (
+      {s.moreInCategory.length > 0 && (
         <section className="mx-auto mt-16 max-w-[1320px] px-4 sm:px-8">
           <SectionHead title={`Mai multe din ${cat?.label ?? ""}`} href={`/categorie/${s.card.category}`} size="md" />
           <div className="col-rules grid gap-10 md:grid-cols-3 md:gap-12">
-            {s.related.slice(4, 7).map((r) => (
+            {s.moreInCategory.map((r) => (
               <StoryBlock key={r.id} story={r} ratio="3/2" size="md" sizes="(max-width: 768px) 100vw, 400px" className="col-rule" />
             ))}
           </div>
@@ -331,4 +338,93 @@ export default async function StoryPage({ params, searchParams }: { params: Prom
       )}
     </main>
   );
+}
+
+/**
+ * Cronologia subiectului, grupată pe publicații: o publicație = un rând (primul ei titlu), restul
+ * titlurilor ei sub „+N actualizări”. Primele 8 publicații sunt vizibile, celelalte se deschid la cerere.
+ * Miniaturile apar doar când poza diferă de cele de deasupra (nu de 20 de ori același portret).
+ */
+function Timeline({ sources, heroKey }: { sources: SourceChip[]; heroKey?: string }) {
+  const byOutlet = new Map<string, SourceChip[]>();
+  for (const x of [...sources].sort((a, b) => a.published - b.published)) byOutlet.set(x.name, [...(byOutlet.get(x.name) ?? []), x]);
+  const groups = [...byOutlet.values()];
+  // Poza principală a paginii nu se mai repetă ca miniatură.
+  const shownThumbs = new Set<string>(heroKey ? [heroKey] : []);
+  const row = (list: SourceChip[], i: number) => {
+    const [first, ...more] = list;
+    const thumbKey = first.thumb?.smallSrc ?? first.thumb?.src ?? "";
+    const showThumb = Boolean(first.thumb && i < 8 && !shownThumbs.has(thumbKey));
+    if (showThumb) shownThumbs.add(thumbKey);
+    return (
+      <li key={first.url} className="flex gap-4 border-b border-rule py-3 last:border-0">
+        <span className="ui w-14 shrink-0 pt-0.5 text-[12px] leading-tight text-ink-3" suppressHydrationWarning>
+          {!first.timeUncertain && <b className="block text-[13px] font-semibold text-ink-2">{formatTime(first.published)}</b>}
+          {formatDay(first.published)}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="ui text-[14px] font-semibold">
+            {first.name}
+            {i === 0 && groups.length > 1 && <span className="kicker ml-2 text-accent">Primul raport</span>}
+          </div>
+          <a href={first.url} target="_blank" rel="noopener" className="mt-0.5 block text-[16px] leading-snug hover:underline">
+            {first.title} <span className="ui text-ink-3">↗</span>
+          </a>
+          {more.length > 0 && (
+            <details className="ui mt-1 text-[13px]">
+              <summary className="cursor-pointer text-ink-2">+{more.length} {more.length === 1 ? "actualizare" : "actualizări"}</summary>
+              <ul className="mt-1 space-y-1 border-l border-rule pl-3">
+                {more.map((m) => (
+                  <li key={m.url}>
+                    <a href={m.url} target="_blank" rel="noopener" className="hover:underline">
+                      {m.title}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+        {showThumb && first.thumb && (
+          <a href={first.url} target="_blank" rel="noopener" className="hidden w-20 shrink-0 sm:block" title={first.thumb.credit}>
+            <Figure img={first.thumb} ratio="1/1" sizes="80px" />
+          </a>
+        )}
+      </li>
+    );
+  };
+  return (
+    <>
+      <ol className="mt-3">{groups.slice(0, 8).map(row)}</ol>
+      {groups.length > 8 && (
+        <details className="mt-2">
+          <summary className="ui cursor-pointer text-[14px] font-semibold">Toate cele {groups.length} publicații</summary>
+          <ol>{groups.slice(8).map((g, i) => row(g, i + 8))}</ol>
+        </details>
+      )}
+    </>
+  );
+}
+
+/** Până la 4 extrase de la alte publicații decât sursa principală, cu titluri diferite între ele. */
+function pickAngles(sources: SourceChip[], exceptUrl?: string): SourceChip[] {
+  const out: SourceChip[] = [];
+  const words = (t: string) => new Set(t.toLowerCase().split(/[^a-zăâîșțş0-9]+/u).filter((w) => w.length > 3));
+  for (const x of sources) {
+    if (!x.excerpt || x.url === exceptUrl || out.some((o) => o.name === x.name)) continue;
+    const w = words(x.title);
+    const similar = out.some((o) => {
+      const ow = words(o.title);
+      const inter = [...w].filter((k) => ow.has(k)).length;
+      return inter / Math.max(1, Math.min(w.size, ow.size)) > 0.5;
+    });
+    if (!similar) out.push(x);
+    if (out.length >= 4) break;
+  }
+  return out;
+}
+
+/** „26 sept.”: ziua scurtă, pentru cronologie. */
+function formatDay(ts: number): string {
+  return new Intl.DateTimeFormat("ro-RO", { day: "numeric", month: "short", timeZone: "Europe/Bucharest" }).format(ts);
 }

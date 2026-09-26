@@ -1,6 +1,6 @@
 import { config } from "../core/config";
 import { db, today } from "../core/db";
-import { properNames } from "../pipeline/text";
+import { entities, GENERIC_ENTITIES, keywords, properNames } from "../pipeline/text";
 import type { ArticleQuote, ArticleSection, ArticleSourceRef, CategorySlug, ImageRow, Img, RegionSlug } from "../core/types";
 
 /*
@@ -19,6 +19,10 @@ export interface SourceChip {
   thumb?: Img;
   /** Articolul reprezentativ al subiectului (dă titlul de lucru și extrasul). */
   lead?: boolean;
+  /** Extras scurt (sub limita legală de ~120 de caractere) din rezumatul sursei. */
+  excerpt?: string;
+  /** Ora nu e sigură: fluxul a dat aceeași oră mai multor articole (ora colectării). */
+  timeUncertain?: boolean;
 }
 
 export interface StoryCard {
@@ -142,7 +146,8 @@ function cards(rows: StoryRow[]): StoryCard[] {
     // Miniatura: întâi a articolului reprezentativ (cel care dă și titlul de lucru).
     const thumbItem = its.find((i) => i.id === r.lead_item_id && i.thumb_image_id) ?? its.find((i) => i.thumb_image_id);
     const kind = (r.a_kind as "full" | "brief" | null) ?? "raw";
-    const dek = r.a_dek ?? snippet((its.find((i) => i.id === r.lead_item_id) ?? its[0])?.summary ?? "");
+    const leadItem = its.find((i) => i.id === r.lead_item_id) ?? its[0];
+    const dek = r.a_dek ?? (leadItem ? excerptOf(leadItem.title, leadItem.summary) ?? "" : "");
     return {
       id: r.id,
       href: storyHref(r),
@@ -263,6 +268,7 @@ export interface StoryDetail {
   sources: SourceChip[];
   corrections: { text: string; created_at: number }[];
   related: StoryCard[];
+  moreInCategory: StoryCard[];
   topics: string[];
   status: string;
 }
@@ -304,10 +310,16 @@ export function getStory(id: string, opts: { preview?: boolean } = {}): StoryDet
 
   const items = d
     .prepare(
-      `SELECT i.id, i.url, i.title, i.published_at, i.thumb_image_id, s.name, s.site FROM items i JOIN sources s ON s.id = i.source_id
-       WHERE i.story_id = ? ORDER BY i.published_at`
+      `SELECT i.id, i.url, i.title, i.summary, i.published_at, i.thumb_image_id, s.name, s.site FROM items i JOIN sources s ON s.id = i.source_id
+       WHERE i.story_id = ? AND i.duplicate_of IS NULL ORDER BY i.published_at`
     )
-    .all(id) as { id: string; url: string; title: string; published_at: number; thumb_image_id: number | null; name: string; site: string }[];
+    .all(id) as { id: string; url: string; title: string; summary: string; published_at: number; thumb_image_id: number | null; name: string; site: string }[];
+  // Ore nesigure: ≥3 articole ale aceleiași publicații cu exact același minut (ora colectării, nu a publicării).
+  const minuteCount = new Map<string, number>();
+  for (const i of items) {
+    const k = `${i.name}|${Math.floor(i.published_at / 60_000)}`;
+    minuteCount.set(k, (minuteCount.get(k) ?? 0) + 1);
+  }
   const leadId = (d.prepare("SELECT lead_item_id FROM stories WHERE id = ?").get(id) as { lead_item_id: string | null } | undefined)?.lead_item_id;
   const sources: SourceChip[] = items.map((i) => ({
     name: i.name,
@@ -317,27 +329,17 @@ export function getStory(id: string, opts: { preview?: boolean } = {}): StoryDet
     published: i.published_at,
     thumb: imageById(i.thumb_image_id),
     lead: i.id === leadId,
+    excerpt: excerptOf(i.title, i.summary),
+    timeUncertain: (minuteCount.get(`${i.name}|${Math.floor(i.published_at / 60_000)}`) ?? 0) >= 3,
   }));
   const corrections = d.prepare("SELECT text, created_at FROM corrections WHERE story_id = ? ORDER BY created_at").all(id) as { text: string; created_at: number }[];
 
-  // Subiecte legate: aceeași categorie, cuvinte-cheie comune.
-  const kw = (d.prepare("SELECT keywords FROM stories WHERE id = ?").get(id) as { keywords: string }).keywords.split(" ").slice(0, 8);
-  let related: StoryCard[] = [];
-  if (kw.length) {
-    const ids = (
-      d.prepare("SELECT story_id FROM search WHERE search MATCH ? AND story_id != ? LIMIT 30").all(kw.map((k) => `"${k}"*`).join(" OR "), id) as { story_id: string }[]
-    ).map((r) => r.story_id);
-    if (ids.length) {
-      const rows = d
-        .prepare(`${STORY_SELECT} WHERE s.id IN (${ids.map(() => "?").join(",")}) AND ${visibility()} ORDER BY s.last_published_at DESC LIMIT 4`)
-        .all(...ids) as StoryRow[];
-      related = cards(rows);
-    }
-  }
-  if (related.length < 4) {
-    const more = latestStories({ limit: 8, category: row.category }).filter((c) => c.id !== id && !related.some((r) => r.id === c.id));
-    related = [...related, ...more].slice(0, 7);
-  }
+  // Subiecte legate: cuvinte-cheie comune RARE (un cuvânt care apare în multe subiecte, precum
+  // „România” sau „guvern”, nu leagă nimic). Separat: cele mai noi știri din aceeași secțiune.
+  const related = relatedStories(id);
+  const moreInCategory = latestStories({ limit: 8, category: row.category })
+    .filter((c) => c.id !== id && !related.some((r) => r.id === c.id))
+    .slice(0, 3);
 
   return {
     card,
@@ -364,8 +366,9 @@ export function getStory(id: string, opts: { preview?: boolean } = {}): StoryDet
     sources,
     corrections,
     related,
+    moreInCategory,
     // Persoane, instituții și locuri numite în titlurile surselor (legături interne către căutare).
-    topics: topicNames(items.map((i) => i.title)),
+    topics: topicNames(items),
     status: st.status,
   };
 }
@@ -416,9 +419,85 @@ export function outletsList() {
     .all() as { name: string; site: string; tier: number; categories: string; ok: number; feeds: number; last_fetch: number | null }[];
 }
 
-/** Numele proprii (de cel puțin două cuvinte) din titlurile unui subiect, cele mai frecvente primele. */
-function topicNames(titles: string[], max = 6): string[] {
-  const count = new Map<string, number>();
-  for (const t of titles) for (const n of properNames(t)) if (n.split(" ").length >= 2) count.set(n, (count.get(n) ?? 0) + 1);
-  return [...count.entries()].sort((a, b) => b[1] - a[1]).slice(0, max).map(([n]) => n);
+/**
+ * Numele proprii (de cel puțin două cuvinte) din titlurile unui subiect, cele mai frecvente primele.
+ * Fără titluri scrise cu majuscule, fără formule de adresare („Domnul Grindeanu”), cu formele
+ * gramaticale unite („Guvernului Mureșan” = „Guvernul Mureșan”); la subiectele cu mai multe
+ * publicații, numele trebuie să apară la cel puțin două dintre ele.
+ */
+function topicNames(items: { title: string; name: string }[], max = 6): string[] {
+  const seen = new Map<string, { label: string; outlets: Set<string>; n: number }>();
+  const outletsTotal = new Set(items.map((i) => i.name)).size;
+  for (const it of items) {
+    const letters = it.title.replace(/[^A-Za-zĂÂÎȘŞȚŢăâîșşțţ]/g, "");
+    if (letters.length > 12 && letters === letters.toUpperCase()) continue;
+    for (let n of properNames(it.title)) {
+      n = n.replace(/^(Domnul|Doamna|Domnului|Doamnei|Premierul|Premierului|Președintele|Președintelui|Ministrul|Ministrului)\s+/u, "");
+      const words = n.split(" ");
+      if (words.length < 2 || words.some((w) => /^[A-ZĂÂÎȘŞȚŢ]{2,}$/.test(w) && w.length > 4)) continue;
+      const key = words.map((w) => w.toLowerCase().replace(/(ului|ul|ei|lui|ii)$/u, "")).join(" ");
+      const cur = seen.get(key) ?? { label: n, outlets: new Set<string>(), n: 0 };
+      if (n.length < cur.label.length) cur.label = n; // forma de bază e de obicei cea mai scurtă
+      cur.outlets.add(it.name);
+      cur.n++;
+      seen.set(key, cur);
+    }
+  }
+  return [...seen.values()]
+    .filter((x) => outletsTotal < 2 || x.outlets.size >= 2)
+    .sort((a, b) => b.outlets.size - a.outlets.size || b.n - a.n)
+    .slice(0, max)
+    .map((x) => x.label);
+}
+
+/** Extrasul unei surse: începutul rezumatului, dacă nu doar repetă titlul. */
+function excerptOf(title: string, summary: string): string | undefined {
+  // Fără ghilimelele sursei la început/sfârșit (le adaugă pagina).
+  const sum = summary.replace(/\s+/g, " ").trim().replace(/^[„"“«»]+|[”"“»«]+$/g, "").trim();
+  if (sum.length < 40) return undefined;
+  const norm = (x: string) => x.toLowerCase().replace(/[^a-zăâîșțş0-9 ]/g, "").slice(0, 60);
+  if (norm(sum).startsWith(norm(title).slice(0, 40))) return undefined;
+  return snippet(sum);
+}
+
+/**
+ * Subiectele cu adevărat legate: din ultimele 4 zile, cu un nume propriu comun și cel puțin 2 cuvinte-cheie comune în titlu care sunt
+ * rare în perioada respectivă (ponderate ca IDF), ordonate după scorul de suprapunere.
+ */
+function relatedStories(id: string, limit = 4): StoryCard[] {
+  const d = db();
+  const rows = d
+    .prepare(`SELECT s.id, s.title FROM stories s WHERE s.status = 'active' AND s.last_published_at > ?`)
+    .all(Date.now() - 4 * 86400_000) as { id: string; title: string }[];
+  // Doar titlul principal: subiectele mari adună cuvintele a zeci de titluri și s-ar „lega” de orice.
+  const sets = new Map(rows.map((r) => [r.id, new Set(keywords(r.title).filter((k) => k.length >= 4 && !/^\d+$/.test(k)))]));
+  // Numele proprii din titlu (fără cele generice: țări, agenții): trebuie să existe cel puțin unul comun.
+  const names = new Map(rows.map((r) => [r.id, new Set(entities(r.title).filter((e) => !GENERIC_ENTITIES.has(e)))]));
+  const myNames = names.get(id) ?? new Set<string>();
+  const mine = sets.get(id);
+  if (!mine?.size) return [];
+  const df = new Map<string, number>();
+  for (const set of sets.values()) for (const k of set) df.set(k, (df.get(k) ?? 0) + 1);
+  const N = sets.size;
+  const scored: { id: string; score: number; shared: number }[] = [];
+  for (const [other, set] of sets) {
+    if (other === id) continue;
+    let score = 0;
+    let shared = 0;
+    for (const k of mine) {
+      if (!set.has(k)) continue;
+      const n = df.get(k) ?? 1;
+      if (n > N * 0.03) continue; // prea comun ca să lege două subiecte
+      score += Math.log(N / n);
+      shared++;
+    }
+    const sameName = [...(names.get(other) ?? [])].some((e) => myNames.has(e));
+    if (sameName && shared >= 2 && score >= 9) scored.push({ id: other, score, shared });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  const ids = scored.slice(0, limit * 2).map((x) => x.id);
+  if (!ids.length) return [];
+  const cardRows = d.prepare(`${STORY_SELECT} WHERE s.id IN (${ids.map(() => "?").join(",")}) AND ${visibility()}`).all(...ids) as StoryRow[];
+  const order = new Map(ids.map((x, i) => [x, i]));
+  return cards(cardRows.sort((a, b) => order.get(a.id)! - order.get(b.id)!).slice(0, limit));
 }

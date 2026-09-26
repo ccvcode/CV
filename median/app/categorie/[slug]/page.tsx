@@ -32,9 +32,16 @@ export default async function CategoryPage({ params, searchParams }: { params: P
   const page = Math.max(1, Number(sp.pagina) || 1);
 
   const used = new Set<string>();
-  const top = page === 1 ? topStories({ category: c.slug, region, limit: 5, hours: 72, exclude: used }) : [];
-  const list = latestStories({ category: c.slug, region, limit: PER_PAGE + 1, offset: (page - 1) * PER_PAGE }).filter((s) => !used.has(s.id));
-  const hasMore = list.length > PER_PAGE;
+  // Sus: cele mai importante subiecte din ultimele 30 de ore (72 dacă secțiunea e mai liniștită).
+  const topOf = (hours: number) => topStories({ category: c.slug, region, limit: 5, hours, exclude: new Set() });
+  const topList = page === 1 ? (topOf(30).length >= 3 ? topOf(30) : topOf(72)) : [];
+  topList.forEach((s) => used.add(s.id));
+  const top = topList;
+  // Lista cronologică: cerem mai multe, ca după eliminarea celor de sus să rămână o pagină întreagă.
+  const offset = page === 1 ? 0 : (page - 1) * PER_PAGE + 5;
+  const fetched = latestStories({ category: c.slug, region, limit: PER_PAGE + 6, offset }).filter((s) => !used.has(s.id));
+  const hasMore = fetched.length > PER_PAGE;
+  const list = fetched.slice(0, PER_PAGE + 1);
   const [lead, ...second] = top;
   const qs = (p: number) => `/categorie/${c.slug}?${new URLSearchParams({ ...(region ? { regiune: region } : {}), pagina: String(p) })}`;
 
