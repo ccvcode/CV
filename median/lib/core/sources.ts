@@ -3,6 +3,17 @@ import type { CategorySlug, Source } from "./types";
 type Row = [name: string, site: string, url: string, category: CategorySlug, kind?: Source["kind"]];
 
 /*
+ * Agerpres NU este inclus: este agenție cu abonament plătit, iar condițiile sale limitează
+ * preluarea. Se poate adăuga doar pe baza unui contract.
+ */
+
+/** Publicații cu redacții mari și standarde editoriale verificabile (cântăresc mai mult în scor). */
+const TIER1 = new Set([
+  "Digi24", "HotNews", "G4Media", "Știrile ProTV", "Libertatea", "Adevărul", "Mediafax", "News.ro",
+  "Europa Liberă", "RFI România", "Ziarul Financiar", "Recorder", "Observator", "TVR Info", "Profit.ro", "GSP",
+]);
+
+/*
  * Lista surselor RSS agregate de Median. Fluxurile pe secțiuni (ex. Digi24 Economie)
  * au prioritate față de fluxul general al aceleiași publicații atunci când un articol
  * apare în ambele, astfel încât categoria să fie cât mai precisă.
@@ -18,7 +29,6 @@ const ROWS: Row[] = [
   ["Adevărul", "https://adevarul.ro", "https://adevarul.ro/rss", "national", "presa"],
   ["Mediafax", "https://www.mediafax.ro", "https://www.mediafax.ro/rss", "national", "agentie"],
   ["News.ro", "https://www.news.ro", "https://www.news.ro/rss", "national", "agentie"],
-  ["Agerpres", "https://www.agerpres.ro", "https://www.agerpres.ro/rss/", "national", "agentie"],
   ["Antena 3 CNN", "https://www.antena3.ro", "https://www.antena3.ro/rss", "national", "tv"],
   ["Observator", "https://observatornews.ro", "https://observatornews.ro/rss", "national", "tv"],
   ["Gândul", "https://www.gandul.ro", "https://www.gandul.ro/rss", "national", "online"],
@@ -114,6 +124,7 @@ export const SOURCES: Source[] = ROWS.map(([name, site, url, category, kind]) =>
   url,
   category,
   kind,
+  tier: TIER1.has(name) ? 1 : 2,
 }));
 
 /** Publicațiile unice (o intrare per nume), pentru pagina „Surse”. */

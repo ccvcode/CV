@@ -1,6 +1,6 @@
 import { XMLParser } from "fast-xml-parser";
-import type { Article, Source } from "./types";
-import { cleanText, decodeEntities, fixDiacritics, hashId, readingTime, slugify, stripHtml, truncate } from "./utils";
+import type { ImageCandidate, ParsedItem } from "../core/types";
+import { cleanText, decodeEntities, fixDiacritics, hashId, stripHtml, truncate } from "../core/utils";
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -39,22 +39,6 @@ function attr(n: unknown, a: string): string {
 }
 
 const IMG_TAG_RE = /<img\b[^>]*>/gi;
-const LAZY_ATTRS = ["data-src", "data-lazy-src", "data-original", "data-srcset", "srcset", "src"];
-
-/** Prima imagine reală din HTML — preferăm atributele lazy-load față de placeholder-ul din „src”. */
-function firstImg(html: string): string | undefined {
-  for (const tag of html.match(IMG_TAG_RE) ?? []) {
-    for (const attrName of LAZY_ATTRS) {
-      const m = new RegExp(`\\s${attrName}\\s*=\\s*["']([^"']+)["']`, "i").exec(tag);
-      if (!m) continue;
-      const url = m[1].trim().split(/\s+/)[0];
-      if (!url || url.startsWith("data:") || /(lazy|placeholder|blank|spacer)\.(gif|png|svg)/i.test(url)) continue;
-      return url;
-    }
-  }
-  return undefined;
-}
-
 function absolutize(url: string, base: string): string {
   if (!url) return "";
   url = decodeEntities(url.trim());
@@ -75,30 +59,50 @@ function isLikelyImage(url: string): boolean {
   return true;
 }
 
-function extractImage(item: Record<string, unknown>, html: string, base: string): string | undefined {
-  const candidates: string[] = [];
+/** Cel mai mare candidat dintr-un srcset („a.jpg 300w, b.jpg 1024w”). */
+function bestFromSrcset(srcset: string): string | undefined {
+  let best: { url: string; w: number } | undefined;
+  for (const part of srcset.split(",")) {
+    const [url, d] = part.trim().split(/\s+/);
+    if (!url || url.startsWith("data:")) continue;
+    const w = d ? parseFloat(d) * (d.endsWith("x") ? 1000 : 1) : 0;
+    if (!best || w > best.w) best = { url, w };
+  }
+  return best?.url;
+}
+
+/** Toate imaginile candidate dintr-un item RSS; alegerea finală se face în pipeline-ul de imagini. */
+function imageCandidates(item: Record<string, unknown>, html: string, base: string): ImageCandidate[] {
+  const out: ImageCandidate[] = [];
+  const push = (raw: string, from: ImageCandidate["from"], w?: string, h?: string) => {
+    const url = absolutize(text(raw), base);
+    if (!url || !isLikelyImage(url) || out.some((c) => c.url === url)) return;
+    const width = Number(w) || undefined;
+    const height = Number(h) || undefined;
+    out.push({ url, from, width, height });
+  };
   const group = item["media:group"] as Record<string, unknown> | undefined;
   for (const mc of [...arr(item["media:content"]), ...arr(group?.["media:content"])]) {
     const medium = attr(mc, "medium");
     const type = attr(mc, "type");
-    if (!medium || medium === "image" || type.startsWith("image")) candidates.push(attr(mc, "url"));
+    if (!medium || medium === "image" || type.startsWith("image")) push(attr(mc, "url"), "rss-media", attr(mc, "width"), attr(mc, "height"));
   }
-  for (const mt of [...arr(item["media:thumbnail"]), ...arr(group?.["media:thumbnail"])]) candidates.push(attr(mt, "url"));
+  for (const mt of [...arr(item["media:thumbnail"]), ...arr(group?.["media:thumbnail"])]) push(attr(mt, "url"), "rss-media", attr(mt, "width"), attr(mt, "height"));
   for (const enc of arr(item["enclosure"])) {
     const type = attr(enc, "type");
-    if (!type || type.startsWith("image")) candidates.push(attr(enc, "url"));
+    if (!type || type.startsWith("image")) push(attr(enc, "url"), "rss-enclosure");
   }
-  const itunes = item["itunes:image"];
-  if (itunes) candidates.push(attr(itunes, "href"));
   const direct = item["image"];
-  if (direct) candidates.push(typeof direct === "string" ? direct : text((direct as Record<string, unknown>)["url"]) || attr(direct, "url"));
-  const inline = firstImg(html);
-  if (inline) candidates.push(inline);
-  for (const c of candidates) {
-    const u = absolutize(text(c), base);
-    if (u && isLikelyImage(u)) return u.replace(/^http:\/\//, "https://");
+  if (direct) push(typeof direct === "string" ? direct : text((direct as Record<string, unknown>)["url"]) || attr(direct, "url"), "rss-media");
+  for (const tag of html.match(IMG_TAG_RE) ?? []) {
+    const get = (name: string) => new RegExp(`\\s${name}\\s*=\\s*["']([^"']+)["']`, "i").exec(tag)?.[1];
+    const srcset = get("data-srcset") || get("srcset");
+    const url = get("data-src") || get("data-lazy-src") || get("data-original") || (srcset && bestFromSrcset(srcset)) || get("src");
+    if (!url || url.startsWith("data:") || /(lazy|placeholder|blank|spacer)\.(gif|png|svg)/i.test(url)) continue;
+    push(url, "rss-html", get("width"), get("height"));
+    if (out.length > 6) break;
   }
-  return undefined;
+  return out;
 }
 
 const RO_MONTHS: Record<string, string> = {
@@ -163,7 +167,7 @@ function atomLink(entry: Record<string, unknown>): string {
   return attr(alt ?? links[0], "href") || text(links[0]);
 }
 
-export function parseFeed(xml: string, source: Source, now = Date.now()): Article[] {
+export function parseFeed(xml: string, site: string, now = Date.now()): ParsedItem[] {
   let doc: Record<string, unknown>;
   try {
     doc = parser.parse(xml);
@@ -178,39 +182,31 @@ export function parseFeed(xml: string, source: Source, now = Date.now()): Articl
     ? arr(feed["entry"])
     : arr((channel?.["item"] as unknown) ?? rdf?.["item"]);
 
-  const out: Article[] = [];
-  for (const item of items.slice(0, 60)) {
+  const out: ParsedItem[] = [];
+  for (const item of items.slice(0, 80)) {
     const guid = item["guid"];
     const guidLink = guid && attr(guid, "isPermaLink") !== "false" && /^https?:/i.test(text(guid)) ? text(guid) : "";
-    const link = absolutize(feed ? atomLink(item) : text(item["link"]) || guidLink, source.site);
-    const title = truncate(cleanText(text(item["title"])), 220);
+    const link = absolutize(feed ? atomLink(item) : text(item["link"]) || guidLink, site);
+    const title = truncate(cleanText(text(item["title"])), 240);
     if (!link || !title) continue;
     const contentHtml = text(item["content:encoded"]) || text(item["content"]) || "";
     const descHtml = text(item["description"]) || text(item["summary"]) || "";
-    const html = decodeMaybeEscaped(contentHtml || descHtml);
-    const summarySrc = stripHtml(decodeMaybeEscaped(descHtml || contentHtml));
-    const summary = truncate(summarySrc.replace(/\s+/g, " ").replace(/(Citește|Citeste) (mai mult|tot articolul).*$/i, "").replace(/The post .* appeared first on .*$/i, "").trim(), 420);
-    const content = contentHtml ? truncate(stripHtml(decodeMaybeEscaped(contentHtml)), 1600) : undefined;
-    const published =
-      parseDate(text(item["pubDate"]) || text(item["published"]) || text(item["updated"]) || text(item["dc:date"])) || now;
-    const image = extractImage(item, html, source.site);
-    const author = authorOf(item) || undefined;
+    const html = decodeMaybeEscaped(contentHtml + " " + descHtml);
+    const summarySrc = stripHtml(decodeMaybeEscaped(contentHtml.length > descHtml.length ? contentHtml : descHtml));
+    const summary = summarySrc
+      .replace(/(Citește|Citeste) (mai mult|tot articolul|și).*$/i, "")
+      .replace(/The post .* appeared first on .*$/i, "")
+      .trim();
+    const published = parseDate(text(item["pubDate"]) || text(item["published"]) || text(item["updated"]) || text(item["dc:date"])) || now;
+    const author = authorOf(item);
     out.push({
       id: hashId(canonicalLink(link)),
-      slug: slugify(title, 70),
+      url: link,
       title: fixDiacritics(title),
-      summary: summary === title ? "" : summary,
-      content: content && content.length > summary.length + 80 ? content : undefined,
-      link,
-      image,
-      published: Math.min(published, now + 5 * 60_000),
-      fetched: now,
-      sourceId: source.id,
-      sourceName: source.name,
-      sourceSite: source.site,
-      category: source.category,
+      summary: summary.slice(0, 6000),
       author: author && author.length < 60 ? author : undefined,
-      readingTime: readingTime((content ?? summary) + " " + title),
+      published: Math.min(published, now + 5 * 60_000),
+      images: imageCandidates(item, html, site),
     });
   }
   return out;
