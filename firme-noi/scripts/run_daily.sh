@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# Rulare zilnică automată: colectează firme noi din ONRC, le îmbogățește cu
-# date ANAF și caută telefoane. Programează cu cron (vezi crontab.example).
+# Rulare zilnică automată (Linux/Mac): ia firmele noi direct de la ANAF
+# (inclusiv telefonul), verifică telefoanele și exportă Excel-ul pe ani.
+# Programează cu cron (vezi crontab.example).
+#
+#   scripts/run_daily.sh          -> anul curent
+#   scripts/run_daily.sh 2020     -> toți anii de la 2020 până azi
 set -euo pipefail
 
 # Mergem în folderul proiectului (părintele acestui script)
@@ -13,12 +17,20 @@ if [[ -d ".venv" ]]; then
 fi
 
 AN="$(date '+%Y')"
-echo "[$(date '+%F %T')] Pornire colectare firme noi ($AN)"
-python run.py run --source onrc --an "$AN"
+START="${1:-$AN}"
+echo "[$(date '+%F %T')] Pornire colectare firme noi ($START–$AN)"
+python run.py collect --source anaf_scan --dupa "$START-01-01"
+python run.py enrich
+python run.py verifica-telefoane
 python run.py stats
 
-# Export: toate firmele din an + doar cele cu telefon valid
-python run.py export --format xlsx --dupa "$AN-01-01" --out "export/Firme-noi-$AN.xlsx"
-python run.py export --format xlsx --dupa "$AN-01-01" --with-phone --fara-suspecte \
-  --out "export/Firme-noi-$AN-cu-telefon.xlsx"
+for an in $(seq "$START" "$AN"); do
+  d="export/$an"
+  interval=(--dupa "$an-01-01" --inainte "$an-12-31")
+  python run.py export --format xlsx --doar-firme "${interval[@]}" --out "$d/Firme-noi-$an.xlsx"
+  python run.py export --format xlsx --doar-firme "${interval[@]}" --with-phone --fara-suspecte \
+    --fara-comune --out "$d/Firme-noi-$an-cu-telefon.xlsx"
+  python run.py export "${interval[@]}" --out "$d/Toate-inregistrarile-$an.csv"
+  python run.py stats --an "$an" > "$d/STATISTICI.txt"
+done
 echo "[$(date '+%F %T')] Gata."

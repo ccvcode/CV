@@ -158,3 +158,50 @@ def iter_companies_from_file(path: Path | str, sursa: str = "import") -> Iterato
             website=clean.get("website"),
             sursa=sursa,
         )
+
+
+# --------------------------------------------------------------------------- #
+# Restaurare din exporturile proprii (Toate-inregistrarile-AN.csv[.gz])         #
+# --------------------------------------------------------------------------- #
+
+def _export_types() -> dict[str, type]:
+    """Tipul de bază (int/float/bool/str) al fiecărui câmp din Company."""
+    from dataclasses import fields
+    from typing import get_args, get_type_hints
+
+    out = {}
+    for name, hint in get_type_hints(Company).items():
+        args = [a for a in get_args(hint) if a is not type(None)] or [hint]
+        out[name] = args[0]
+    return {f.name: out[f.name] for f in fields(Company)}
+
+
+def iter_companies_from_export(path: Path | str) -> Iterator[Company]:
+    """Citește un export `Toate-inregistrarile-AN.csv` (sau `.csv.gz`) creat de
+    `run.py export` și refață înregistrările cu toate câmpurile lor, inclusiv
+    `sursa` și `anaf_verificat` — astfel scanarea ANAF continuă de unde a rămas
+    și firmele nu mai sunt interogate din nou."""
+    import csv
+    import gzip
+
+    path = Path(path)
+    types = _export_types()
+    opener = gzip.open if path.suffix.lower() == ".gz" else open
+    with opener(path, "rt", encoding="utf-8-sig", newline="") as fh:
+        for row in csv.DictReader(fh):
+            data: dict[str, object] = {}
+            for key, value in row.items():
+                kind = types.get(key)
+                if kind is None or value in (None, ""):
+                    continue
+                if kind is bool:
+                    data[key] = value.strip().lower() in ("1", "true", "da")
+                elif kind is int:
+                    data[key] = int(float(value))
+                elif kind is float:
+                    data[key] = float(value)
+                else:
+                    data[key] = value
+            if "cui" not in data:
+                continue
+            yield Company.from_row(data)

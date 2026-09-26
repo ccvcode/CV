@@ -352,6 +352,33 @@ class TestPhoneQuality(unittest.TestCase):
             os.unlink(tmp.name)
 
 
+class TestRestore(unittest.TestCase):
+    def test_export_csv_round_trip(self):
+        import csv
+        import gzip
+        import run
+        from firme.importers import iter_companies_from_export
+        c = Company(cui=55623502, denumire="X S.R.L.", nr_reg_com="J2026015992000",
+                    telefon="0744123987", telefon_suspect=False, platitor_tva=True,
+                    inactiv=False, numar_salariati=3, cifra_afaceri=1500.5,
+                    data_inregistrare="2026-09-23", sursa="anaf_scan", anaf_verificat=True)
+        tmp = tempfile.NamedTemporaryFile(suffix=".csv.gz", delete=False)
+        tmp.close()
+        try:
+            with gzip.open(tmp.name, "wt", encoding="utf-8", newline="") as fh:
+                w = csv.writer(fh)
+                w.writerow(run.EXPORT_COLUMNS)
+                row = run.export_row(c)
+                w.writerow([row.get(k) for k in run.EXPORT_COLUMNS])
+            (back,) = list(iter_companies_from_export(tmp.name))
+        finally:
+            os.unlink(tmp.name)
+        for name in ("cui", "denumire", "nr_reg_com", "telefon", "telefon_suspect",
+                     "platitor_tva", "inactiv", "numar_salariati", "cifra_afaceri",
+                     "data_inregistrare", "sursa", "anaf_verificat"):
+            self.assertEqual(getattr(back, name), getattr(c, name), name)
+
+
 class TestClassify(unittest.TestCase):
     """Exemple reale din colectarea 2026."""
 

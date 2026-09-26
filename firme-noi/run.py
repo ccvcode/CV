@@ -264,6 +264,24 @@ def cmd_import(args, cfg, db):
     print(f"Import terminat: {noi} firme noi din {total} rânduri citite.")
 
 
+def cmd_restore(args, cfg, db):
+    """Reface baza de date din exporturile Toate-inregistrarile-AN.csv(.gz)."""
+    from firme.importers import iter_companies_from_export
+    from firme.util import chunked
+
+    for name in args.files:
+        path = Path(name)
+        if not path.exists():
+            sys.exit(f"Fișierul nu există: {path}")
+        noi = total = 0
+        for batch in chunked(iter_companies_from_export(path), 5000):
+            total += len(batch)
+            noi += db.insert_many(batch)
+        print(f"{path.name}: {noi} înregistrări noi din {total}.")
+    db.recheck_phones()
+    print("Gata. Telefoanele au fost reverificate; `python run.py stats` arată totalul.")
+
+
 def cmd_verify(args, cfg, db):
     session = ThrottledSession(
         min_interval=cfg.anaf_min_interval, timeout=cfg.http_timeout,
@@ -457,6 +475,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--file", required=True)
     sp.add_argument("--sursa", default="import")
     sp.set_defaults(func=cmd_import)
+
+    sp = sub.add_parser("restore",
+                        help="reface baza de date din exporturile Toate-inregistrarile-AN.csv(.gz)")
+    sp.add_argument("files", nargs="+")
+    sp.set_defaults(func=cmd_restore)
 
     sp = sub.add_parser("verify", help="confruntă datele cu ANAF real")
     sp.add_argument("--limit", type=int)

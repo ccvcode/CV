@@ -57,10 +57,14 @@ cerere); rulările următoare interoghează doar firmele nou apărute.
    datele de contact să nu devină publice.
 
 **B. Pe calculatorul tău (Windows)** — instalează Python, apoi dublu-click pe
-`scripts\colecteaza.bat`. Excel-urile apar în folderul `export`.
+`scripts\colecteaza.bat` (anul curent) sau rulează `scripts\colecteaza.bat 2020`
+(toți anii de la 2020). Excel-urile apar în `export\<AN>\`. Ca să nu iei
+colectarea de la zero, refă întâi baza de date din rezultatele existente:
+`python run.py restore Toate-inregistrarile-2025.csv.gz …` (fișierele sunt în
+branch-urile `rezultate-*`).
 
-**C. Linux / Mac / server** — `bash scripts/run_daily.sh` (sau programat cu cron,
-vezi `scripts/crontab.example`).
+**C. Linux / Mac / server** — `bash scripts/run_daily.sh [AN_DE_START]` (sau
+programat cu cron, vezi `scripts/crontab.example`).
 
 Rezultatul: `Firme-noi-2026.xlsx` (toate firmele noi active) și
 `Firme-noi-2026-cu-telefon.xlsx` (doar cele cu telefon propriu valid — vezi
