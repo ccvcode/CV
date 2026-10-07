@@ -1,0 +1,19 @@
+# Baza de date locală și fișierele descărcate
+*.db
+*.sqlite
+*.sqlite3
+data/
+downloads/
+export/
+out/
+rezultate/
+
+# Secrete / configurare locală
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/

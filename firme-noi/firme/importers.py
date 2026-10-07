@@ -1,0 +1,207 @@
+"""Import de firme dintr-un fișier existent (Excel .xlsx sau CSV).
+
+Util când ai deja o listă (export dintr-un serviciu, fișier primit etc.) și vrei
+să o încarci în baza de date pentru a o gestiona, deduplica și — important —
+a o VERIFICA ulterior față de sursa oficială ANAF (comanda `enrich`).
+
+Datele importate sunt marcate cu sursa 'import' și NU sunt considerate
+verificate ANAF, tocmai ca să poată fi confruntate cu realitatea la o rulare
+`enrich`. Așa se vede imediat ce informații se confirmă și ce nu.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+import unicodedata
+from pathlib import Path
+from typing import Iterator, Optional
+
+from . import caen as caen_ref
+from .models import Company
+from .util import clean_phone, is_suspect_phone, parse_date
+
+log = logging.getLogger("firme")
+
+
+def _strip_diacritics(text: str) -> str:
+    nfkd = unicodedata.normalize("NFKD", text)
+    return "".join(ch for ch in nfkd if not unicodedata.combining(ch))
+
+
+def _norm_header(text: str) -> str:
+    return _strip_diacritics(str(text)).strip().lower()
+
+
+# Mapare antet -> câmp intern (după cuvinte-cheie, tolerantă la variații).
+def _map_header(header: str) -> Optional[str]:
+    h = _norm_header(header)
+    if "cui" in h or "cod fiscal" in h:
+        return "cui"
+    if "denumire" in h or "firma" in h or h == "nume":
+        return "denumire"
+    if "reg" in h and "com" in h:
+        return "nr_reg_com"
+    if "caen" in h:
+        return "cod_caen"
+    if "judet" in h:
+        return "judet"
+    if "localitate" in h or "oras" in h:
+        return "localitate"
+    if "telefon" in h or "tel." in h or h == "tel":
+        return "telefon"
+    if "adres" in h:
+        return "adresa"
+    if "email" in h or "e-mail" in h:
+        return "email"
+    if "web" in h or "site" in h:
+        return "website"
+    if "data" in h and ("inreg" in h or "reg" in h):
+        return "data_inregistrare"
+    return None
+
+
+def _parse_cui(raw) -> Optional[int]:
+    if raw is None:
+        return None
+    digits = "".join(ch for ch in str(raw) if ch.isdigit())
+    return int(digits) if digits else None
+
+
+def _rows_from_xlsx(path: Path) -> Iterator[list]:
+    try:
+        import openpyxl  # type: ignore
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError(
+            "Pentru import .xlsx e nevoie de openpyxl: pip install openpyxl"
+        ) from exc
+
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    for ws in wb.worksheets:
+        for row in ws.iter_rows(values_only=True):
+            yield list(row)
+
+
+def _rows_from_csv(path: Path) -> Iterator[list]:
+    import csv
+
+    with path.open(encoding="utf-8", errors="replace", newline="") as fh:
+        sample = fh.read(4096)
+        fh.seek(0)
+        try:
+            delimiter = csv.Sniffer().sniff(sample, delimiters=";,\t|").delimiter
+        except csv.Error:
+            delimiter = ","
+        for row in csv.reader(fh, delimiter=delimiter):
+            yield row
+
+
+def iter_companies_from_file(path: Path | str, sursa: str = "import") -> Iterator[Company]:
+    """Citește un fișier și produce Company-uri. Detectează antetul automat."""
+    path = Path(path)
+    if path.suffix.lower() in (".xlsx", ".xlsm"):
+        rows = _rows_from_xlsx(path)
+    else:
+        rows = _rows_from_csv(path)
+
+    col_map: dict[int, str] = {}
+    for row in rows:
+        if not col_map:
+            # Căutăm rândul de antet: cel care conține o coloană CUI + una denumire.
+            candidate = {i: _map_header(v) for i, v in enumerate(row) if v is not None}
+            fields = set(candidate.values())
+            if "cui" in fields and "denumire" in fields:
+                col_map = {i: f for i, f in candidate.items() if f}
+            continue
+
+        record: dict[str, object] = {}
+        for i, value in enumerate(row):
+            field = col_map.get(i)
+            if field and value not in (None, ""):
+                record[field] = value
+
+        cui = _parse_cui(record.get("cui"))
+        if cui is None:
+            continue
+
+        record.pop("cui", None)
+        # Curățăm textul
+        clean = {
+            k: (str(v).strip() if isinstance(v, str) else v) for k, v in record.items()
+        }
+        raw_tel = clean.get("telefon")
+        telefon = clean_phone(raw_tel) or (str(raw_tel).strip() if raw_tel else None)
+        cod_caen = str(clean.get("cod_caen")).strip() if clean.get("cod_caen") is not None else None
+        caen_info = caen_ref.enrich_caen(cod_caen)
+        data_raw = clean.get("data_inregistrare")
+        if hasattr(data_raw, "strftime"):
+            data_inreg = data_raw.strftime("%Y-%m-%d")
+        else:
+            data_inreg = parse_date(str(data_raw)) if data_raw else None
+        yield Company(
+            cui=cui,
+            denumire=clean.get("denumire"),
+            nr_reg_com=clean.get("nr_reg_com"),
+            cod_caen=cod_caen,
+            caen_descriere=caen_info["caen_descriere"],
+            caen_sectiune=caen_info["caen_sectiune"],
+            caen_sectiune_nume=caen_info["caen_sectiune_nume"],
+            judet=clean.get("judet"),
+            localitate=clean.get("localitate"),
+            adresa=clean.get("adresa"),
+            data_inregistrare=data_inreg,
+            telefon=telefon,
+            telefon_sursa="import" if telefon else None,
+            telefon_suspect=is_suspect_phone(telefon) if telefon else None,
+            telefon_cautat=bool(telefon),
+            email=clean.get("email"),
+            website=clean.get("website"),
+            sursa=sursa,
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Restaurare din exporturile proprii (Toate-inregistrarile-AN.csv[.gz])         #
+# --------------------------------------------------------------------------- #
+
+def _export_types() -> dict[str, type]:
+    """Tipul de bază (int/float/bool/str) al fiecărui câmp din Company."""
+    from dataclasses import fields
+    from typing import get_args, get_type_hints
+
+    out = {}
+    for name, hint in get_type_hints(Company).items():
+        args = [a for a in get_args(hint) if a is not type(None)] or [hint]
+        out[name] = args[0]
+    return {f.name: out[f.name] for f in fields(Company)}
+
+
+def iter_companies_from_export(path: Path | str) -> Iterator[Company]:
+    """Citește un export `Toate-inregistrarile-AN.csv` (sau `.csv.gz`) creat de
+    `run.py export` și refață înregistrările cu toate câmpurile lor, inclusiv
+    `sursa` și `anaf_verificat` — astfel scanarea ANAF continuă de unde a rămas
+    și firmele nu mai sunt interogate din nou."""
+    import csv
+    import gzip
+
+    path = Path(path)
+    types = _export_types()
+    opener = gzip.open if path.suffix.lower() == ".gz" else open
+    with opener(path, "rt", encoding="utf-8-sig", newline="") as fh:
+        for row in csv.DictReader(fh):
+            data: dict[str, object] = {}
+            for key, value in row.items():
+                kind = types.get(key)
+                if kind is None or value in (None, ""):
+                    continue
+                if kind is bool:
+                    data[key] = value.strip().lower() in ("1", "true", "da")
+                elif kind is int:
+                    data[key] = int(float(value))
+                elif kind is float:
+                    data[key] = float(value)
+                else:
+                    data[key] = value
+            if "cui" not in data:
+                continue
+            yield Company.from_row(data)
