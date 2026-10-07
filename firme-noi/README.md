@@ -59,9 +59,9 @@ cerere); rulările următoare interoghează doar firmele nou apărute.
 **B. Pe calculatorul tău (Windows)** — instalează Python, apoi dublu-click pe
 `scripts\colecteaza.bat` (anul curent) sau rulează `scripts\colecteaza.bat 2020`
 (toți anii de la 2020). Excel-urile apar în `export\<AN>\`. Ca să nu iei
-colectarea de la zero, refă întâi baza de date din rezultatele existente:
-`python run.py restore Toate-inregistrarile-2025.csv.gz …` (fișierele sunt în
-branch-urile `rezultate-*`).
+colectarea de la zero, refă întâi baza de date din rezultatele existente (din
+clona repository-ului privat):
+`python scripts/descarca_rezultate.py` apoi `python run.py restore rezultate`.
 
 **C. Linux / Mac / server** — `bash scripts/run_daily.sh [AN_DE_START]` (sau
 programat cu cron, vezi `scripts/crontab.example`).
@@ -203,7 +203,7 @@ același telefon (ex. „OASIS CONFORT S.R.L." 55623502 = punct de lucru al firm
 ele nu sunt numărate ca firme noi.
 
 Firme noi active (cu număr J): **2020: 47.465 · 2021: 63.666 · 2022: 75.079 ·
-2023: 68.007 · 2024: 69.681 · 2025: 88.380 · 2026 (până la 25 sept): 54.939**. Fișierele principale (`Firme-noi-AN*.xlsx`) conțin doar
+2023: 68.007 · 2024: 69.681 · 2025: 88.380 · 2026 (până la 6 oct): 56.177**. Fișierele principale (`Firme-noi-AN*.xlsx`) conțin doar
 firmele noi active; `Toate-inregistrarile-AN.csv.gz` le conține pe toate.
 
 ## Verificarea telefoanelor
@@ -224,7 +224,7 @@ Coloana **„Calitate telefon"**: OK · Străin · Comun · Suspect. Fișierul
 `*-cu-telefon.xlsx` conține doar OK și Străin (`--with-phone --fara-suspecte
 --fara-comune`). Firme noi active cu telefon propriu valid: 2020: 13.434 (28%) ·
 2021: 16.596 (26%) · 2022: 19.547 (26%) · 2023: 42.092 (62%) · 2024: 44.778 (64%) ·
-2025: 57.154 (65%) · 2026: 35.226 (64%). ANAF are telefonul mult mai rar pentru
+2025: 57.154 (65%) · 2026: 36.015 (64%). ANAF are telefonul mult mai rar pentru
 firmele înființate înainte de decembrie 2022.
 
 ## Filtre disponibile (comenzile `filter` și `export`)

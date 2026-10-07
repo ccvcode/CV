@@ -264,13 +264,32 @@ def cmd_import(args, cfg, db):
     print(f"Import terminat: {noi} firme noi din {total} rânduri citite.")
 
 
+def _restore_paths(names: list[str]) -> list[Path]:
+    """Fișiere, foldere (caută Toate-inregistrarile-*.csv[.gz] în ele) sau
+    tipare ca `rezultate/*/*.csv.gz` (expandate aici, și pe Windows)."""
+    import glob
+
+    paths: list[Path] = []
+    for name in names:
+        p = Path(name)
+        if p.is_dir():
+            paths += sorted(p.rglob("Toate-inregistrarile-*.csv*"))
+        elif any(ch in name for ch in "*?["):
+            paths += [Path(x) for x in sorted(glob.glob(name))]
+        else:
+            paths.append(p)
+    return paths
+
+
 def cmd_restore(args, cfg, db):
     """Reface baza de date din exporturile Toate-inregistrarile-AN.csv(.gz)."""
     from firme.importers import iter_companies_from_export
     from firme.util import chunked
 
-    for name in args.files:
-        path = Path(name)
+    paths = _restore_paths(args.files)
+    if not paths:
+        sys.exit("Nu am găsit niciun fișier Toate-inregistrarile-AN.csv(.gz).")
+    for path in paths:
         if not path.exists():
             sys.exit(f"Fișierul nu există: {path}")
         noi = total = 0
@@ -478,7 +497,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("restore",
                         help="reface baza de date din exporturile Toate-inregistrarile-AN.csv(.gz)")
-    sp.add_argument("files", nargs="+")
+    sp.add_argument("files", nargs="+", help="fișiere, foldere (ex. rezultate) sau tipare")
     sp.set_defaults(func=cmd_restore)
 
     sp = sub.add_parser("verify", help="confruntă datele cu ANAF real")

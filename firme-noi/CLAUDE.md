@@ -11,9 +11,11 @@ Colectează automat firmele nou înființate în România, cu cât mai multe dat
 pe ani: toate firmele noi active + doar cele cu telefon propriu verificat.
 Proprietar: utilizator român, prospectare comercială. Comunicarea e în română.
 
-## Stare (26 septembrie 2026)
+## Stare (7 octombrie 2026)
 
-Colectare completă 2020 – 25.09.2026: **1.356.255 înregistrări ANAF** în bază.
+Colectare completă 2020 – 06.10.2026: **1.360.424 înregistrări ANAF**. De pe
+7.10.2026 proiectul rulează **local, pe calculatorul utilizatorului**; rularea
+zilnică pe GitHub Actions a fost dezactivată (vezi ultima secțiune).
 
 | An | Înregistrări ANAF | Firme noi active | Cu telefon propriu verificat |
 |---|---|---|---|
@@ -23,7 +25,7 @@ Colectare completă 2020 – 25.09.2026: **1.356.255 înregistrări ANAF** în b
 | 2023 | 195.698 | 68.007 | 42.092 (62%) |
 | 2024 | 173.219 | 69.681 | 44.778 (64%) |
 | 2025 | 211.750 | 88.380 | 57.154 (65%) |
-| 2026 (până la 25 sept) | 243.152 | 54.939 | 35.226 (64%) |
+| 2026 (până la 6 oct) | 247.321 | 56.177 | 36.015 (64%) |
 
 - ANAF are telefon la ~35–40% din înregistrările din ian. 2020 – nov. 2022 și la
   ~70% începând cu dec. 2022 (salt brusc, deci o schimbare la sursă, nu o
@@ -40,26 +42,32 @@ Colectare completă 2020 – 25.09.2026: **1.356.255 înregistrări ANAF** în b
 
 ## Rulare locală (fără GitHub)
 
+Prima instalare, din clona repository-ului privat `ccvcode/web-development`:
+
 ```bash
 pip install -r requirements.txt            # Python 3.10+; doar requests + openpyxl
 python -m unittest discover -s tests -q    # testele (fără rețea)
-
-# 1. Refă baza de date din rezultatele deja colectate (nu mai interoghează ANAF):
-python run.py restore Toate-inregistrarile-2024.csv.gz Toate-inregistrarile-2025.csv.gz ...
-# 2. Continuă colectarea de unde a rămas (în sus = firme noi; în jos = până la data cerută):
-python run.py collect --source anaf_scan --dupa 2020-01-01
-python run.py verifica-telefoane
-# 3. Export pe ani:
-bash scripts/run_daily.sh 2020        # Linux/Mac (colectare + export 2020..azi)
-scripts\colecteaza.bat 2020           # Windows (la fel)
+python scripts/descarca_rezultate.py       # rezultatele din branch-urile rezultate* → rezultate/<AN>/
+python run.py restore rezultate            # reface data/firme.db (~1,36 mil. înregistrări, ~4 min)
+python run.py stats --an 2026              # verificare: trebuie să dea cifrele din tabelul de mai sus
 ```
 
+Apoi, ori de câte ori vrei date noi (ideal zilnic sau săptămânal):
+
+```bash
+scripts\colecteaza.bat                    # Windows: firmele noi + Excel pentru anul curent în export\<AN>\
+bash scripts/run_daily.sh                  # Linux/Mac: la fel
+scripts\colecteaza.bat 2020               # re-exportă toți anii 2020..azi (mai lent)
+```
+
+- `collect --source anaf_scan` continuă de la `cui_range("anaf_scan")` din bază:
+  în sus doar CUI-urile noi, în jos se oprește imediat (anii vechi sunt deja în
+  bază). O zi nouă ≈ 15–30 de loturi ≈ 1 minut.
 - Baza de date: `data/firme.db` (sau variabila `FIRME_DB`). Configurare în
-  `.env` (vezi `.env.example`).
-- Fișierele `Toate-inregistrarile-AN.csv.gz` se descarcă din branch-urile
-  `rezultate-*` (GitHub → branch → fișier → Download).
+  `.env` (vezi `.env.example`). Folderele `data/`, `export/`, `rezultate/` sunt
+  excluse din git.
 - Fără `restore`, `collect` pornește de la CUI-ul implicit (septembrie 2026) și
-  scanează din nou tot intervalul (~1–2 ore pe an).
+  scanează din nou tot intervalul (~1–1,5 ore pe an).
 - Din România, și sursa `onrc` (data.gov.ro) funcționează; nu e necesară.
 
 ## Arhitectură
@@ -76,7 +84,8 @@ firme/classify.py          tip entitate (Firmă / Sediu secundar / PFA / …), a
 firme/util.py              normalizare telefon, detectare numere false, firma_key, sesiune HTTP cu throttle
 firme/excel.py             Excel (write-only): foile Firme, Sumar, Telefoane comune
 firme/importers.py         import din fișiere străine + restaurare din exporturile proprii
-scripts/                   export_ani.sh + publica_rezultate.sh (GitHub), run_daily.sh, colecteaza.bat
+scripts/                   colecteaza.bat, run_daily.sh, descarca_rezultate.py; export_ani.sh +
+                           publica_rezultate.sh (folosite de GitHub Actions)
 .github/workflows/colectare.yml  rularea zilnică pe GitHub (opțională)
 ```
 
@@ -124,11 +133,13 @@ scripts/                   export_ani.sh + publica_rezultate.sh (GitHub), run_da
 - GDPR: telefoanele sunt ale persoanelor juridice, dar pot identifica persoane;
   folosirea pentru marketing trebuie să respecte legislația.
 
-## GitHub Actions (opțional)
+## GitHub Actions (dezactivat pe 7.10.2026)
 
-`colectare.yml` rulează zilnic (`23 4 * * *`), manual (Actions → Run workflow,
-cu `dupa`, `max_batches`) sau la modificarea `rulare.txt`. Baza de date se
-păstrează în cache-ul Actions (`data/firme.db`); scanările lungi continuă automat
-în tranșe (`gh workflow run`). Exportul și publicarea în branch-urile
-`rezultate*` se fac doar la finalul scanării. Pentru oprire: Actions → Colectare
-firme noi → „Disable workflow".
+`colectare.yml` rula zilnic (`23 4 * * *`), manual (Actions → Run workflow, cu
+`dupa`, `max_batches`) sau la modificarea `rulare.txt`. Baza de date se păstra
+în cache-ul Actions (`data/firme.db`); scanările lungi continuau automat în
+tranșe (`gh workflow run`), iar exportul și publicarea în branch-urile
+`rezultate*` se făceau la finalul scanării. Workflow-ul e dezactivat (stare
+`disabled_manually`); se poate reactiva din Actions → Colectare firme noi →
+„Enable workflow". Dacă e reactivat, baza din cache e cea din 6.10.2026 (nu
+conține ce s-a colectat local).

@@ -379,6 +379,21 @@ class TestRestore(unittest.TestCase):
             self.assertEqual(getattr(back, name), getattr(c, name), name)
 
 
+class TestRestorePaths(unittest.TestCase):
+    def test_folder_and_pattern(self):
+        import run
+        with tempfile.TemporaryDirectory() as d:
+            for an in (2020, 2021):
+                os.makedirs(os.path.join(d, str(an)))
+                open(os.path.join(d, str(an), f"Toate-inregistrarile-{an}.csv.gz"), "w").close()
+                open(os.path.join(d, str(an), f"Firme-noi-{an}.xlsx"), "w").close()
+            names = lambda ps: [p.name for p in ps]  # noqa: E731
+            self.assertEqual(names(run._restore_paths([d])),
+                             ["Toate-inregistrarile-2020.csv.gz", "Toate-inregistrarile-2021.csv.gz"])
+            self.assertEqual(names(run._restore_paths([os.path.join(d, "*", "*.csv.gz")])),
+                             ["Toate-inregistrarile-2020.csv.gz", "Toate-inregistrarile-2021.csv.gz"])
+
+
 class TestClassify(unittest.TestCase):
     """Exemple reale din colectarea 2026."""
 
